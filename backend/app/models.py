@@ -27,10 +27,10 @@ class AnalysisStatus(str, Enum):
 
 class ImageViewType(str, Enum):
     """Image view type options."""
-    TOP = "top"
-    BOTTOM = "bottom"
-    LEFT = "left"
-    RIGHT = "right"
+    LCC = "lcc"
+    RCC = "rcc"
+    LMLO = "lmlo"
+    RMLO = "rmlo"
     SINGLE = "single"
     OTHER = "other"
 

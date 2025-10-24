@@ -174,10 +174,10 @@ def _patient_to_schema(session: Session, patient: models.Patient) -> schemas.Pat
 
 @app.post("/infer/multi", response_model=InferenceResponse)
 async def infer_multi(
-    top: UploadFile = File(..., description="Superior view image."),
-    bottom: UploadFile = File(..., description="Inferior view image."),
-    left: UploadFile = File(..., description="Left oblique view image."),
-    right: UploadFile = File(..., description="Right oblique view image."),
+    lcc: UploadFile = File(..., description="Left Craniocaudal view image."),
+    rcc: UploadFile = File(..., description="Right Craniocaudal view image."),
+    lmlo: UploadFile = File(..., description="Left Mediolateral Oblique view image."),
+    rmlo: UploadFile = File(..., description="Right Mediolateral Oblique view image."),
     patient_id: Optional[int] = None,
     service: InferenceService = Depends(get_inference_service),
     session: Session = Depends(get_session),
@@ -220,7 +220,7 @@ async def infer_multi(
     
     try:
         # 3. Read images and run predictions
-        uploads = {"top": top, "bottom": bottom, "left": left, "right": right}
+        uploads = {"lcc": lcc, "rcc": rcc, "lmlo": lmlo, "rmlo": rmlo}
         images = await _read_images(uploads)
         predictions = await _predict_async(service, images)
         
@@ -682,6 +682,22 @@ def update_analysis(
             for img in images
         ],
     )
+
+
+@app.delete("/analyses/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_analysis(
+    analysis_id: int,
+    session: Session = Depends(get_session),
+):
+    """Delete an analysis and its associated images."""
+    logger.info(f"Deleting analysis {analysis_id}")
+    try:
+        analysis = crud.get_analysis(session, analysis_id)
+        crud.delete_analysis(session, analysis)
+        logger.info(f"Successfully deleted analysis {analysis_id}")
+    except Exception as exc:
+        logger.error(f"Failed to delete analysis {analysis_id}: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete analysis: {str(exc)}")
 
 
 if __name__ == "__main__":

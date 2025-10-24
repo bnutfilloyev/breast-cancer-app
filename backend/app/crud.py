@@ -229,6 +229,19 @@ def update_analysis(
         raise DatabaseError(f"Failed to update analysis: {str(exc)}")
 
 
+def delete_analysis(session: Session, analysis: models.Analysis) -> None:
+    """Delete an analysis and its associated images."""
+    try:
+        # Delete associated images first (cascade should handle this, but being explicit)
+        session.delete(analysis)
+        session.commit()
+        logger.info(f"Deleted analysis: {analysis.id}")
+    except Exception as exc:
+        logger.error(f"Failed to delete analysis: {exc}")
+        session.rollback()
+        raise DatabaseError(f"Failed to delete analysis: {str(exc)}")
+
+
 def complete_analysis(
     session: Session,
     analysis: models.Analysis,

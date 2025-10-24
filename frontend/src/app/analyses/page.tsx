@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { FileImage, Search, Calendar, User, TrendingUp, Filter, Eye } from "lucide-react";
+import { FileImage, Search, Calendar, User, TrendingUp, Filter, Eye, Trash2 } from "lucide-react";
 import { analysisAPI } from "@/lib/api";
 
 type Analysis = {
@@ -253,13 +253,34 @@ export default function AnalysesPage() {
                           <div className="text-sm">{analysis.dominant_label}</div>
                         </div>
                       )}
-                      <motion.button 
-                        whileHover={{ scale: 1.1, rotate: 5 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="p-2 rounded-lg bg-purple-100 dark:bg-purple-500/20 border-2 border-purple-200 dark:border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-500/30 transition-all shadow-md"
-                      >
-                        <Eye className="w-5 h-5" />
-                      </motion.button>
+                      <div className="flex gap-2">
+                        <motion.button 
+                          whileHover={{ scale: 1.1, rotate: 5 }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={() => window.location.href = `/analyses/${analysis.id}`}
+                          className="p-2 rounded-lg bg-purple-100 dark:bg-purple-500/20 border-2 border-purple-200 dark:border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-500/30 transition-all shadow-md"
+                        >
+                          <Eye className="w-5 h-5" />
+                        </motion.button>
+                        <motion.button 
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (confirm(`Tahlil #${analysis.id} ni o'chirmoqchimisiz?`)) {
+                              try {
+                                await analysisAPI.delete(analysis.id);
+                                loadAnalyses();
+                              } catch (error) {
+                                alert("O'chirishda xatolik yuz berdi");
+                              }
+                            }
+                          }}
+                          className="p-2 rounded-lg bg-rose-100 dark:bg-rose-500/20 border-2 border-rose-200 dark:border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-500/30 transition-all shadow-md"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </motion.button>
+                      </div>
                     </div>
                   </div>
                 </div>

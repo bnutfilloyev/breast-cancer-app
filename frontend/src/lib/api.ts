@@ -62,7 +62,7 @@ export const patientAPI = {
 };
 
 export const analysisAPI = {
-  list: async (params?: { skip?: number; limit?: number; status?: string }) => {
+  list: async (params?: { skip?: number; limit?: number; status?: string; patient_id?: number }) => {
     const response = await api.get('/analyses', { params });
     return response.data;
   },
@@ -73,6 +73,9 @@ export const analysisAPI = {
   update: async (id: number, data: any) => {
     const response = await api.patch(`/analyses/${id}`, data);
     return response.data;
+  },
+  delete: async (id: number) => {
+    await api.delete(`/analyses/${id}`);
   },
   create: async (imageFile: File, patientId?: number) => {
     const formData = new FormData();

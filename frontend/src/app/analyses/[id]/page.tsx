@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, SyntheticEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -23,9 +23,8 @@ import {
   Printer,
   Loader2,
 } from "lucide-react";
-import { analysisAPI } from "@/lib/api";
+import { analysisAPI, API_BASE_URL } from "@/lib/api";
 import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 
 type Detection = {
   bbox: {
@@ -75,6 +74,8 @@ type Analysis = {
   updated_at: string | null;
   images: AnalysisImage[];
 };
+
+const IMAGE_PLACEHOLDER = "/analysis-placeholder.svg";
 
 export default function AnalysisDetailPage() {
   const params = useParams();
@@ -137,12 +138,35 @@ export default function AnalysisDetailPage() {
       router.push("/analyses");
     } catch (error: any) {
       console.error("Failed to delete analysis:", error);
-      alert("O'chirishda xatolik: " + (error.message || "Unknown error"));
+      alert("Oʼchirishda xatolik: " + (error.message || "Unknown error"));
     }
   };
 
+
   const handleExportPDF = async () => {
     if (!analysis) return;
+
+    const loadImageForExport = async (url: string) => {
+      const response = await fetch(url, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`Rasmni yuklab boʼlmadi (kod: ${response.status})`);
+      }
+
+      const blob = await response.blob();
+      return new Promise<HTMLImageElement>((resolve, reject) => {
+        const objectUrl = URL.createObjectURL(blob);
+        const image = new Image();
+        image.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          resolve(image);
+        };
+        image.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error("Rasmni qayta ishlashda xatolik"));
+        };
+        image.src = objectUrl;
+      });
+    };
 
     try {
       setExporting(true);
@@ -150,200 +174,189 @@ export default function AnalysisDetailPage() {
       const pdf = new jsPDF("p", "mm", "a4");
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
+      const horizontalMargin = 20;
       let yPosition = 20;
 
-      // Header
       pdf.setFillColor(99, 102, 241);
-      pdf.rect(0, 0, pageWidth, 15, "F");
+      pdf.rect(0, 0, pageWidth, 16, "F");
       pdf.setTextColor(255, 255, 255);
       pdf.setFontSize(22);
-      pdf.text("Ko'krak Saratoni Tahlili", 15, 10);
-
-      yPosition = 25;
-      pdf.setTextColor(0, 0, 0);
-      pdf.setFontSize(10);
-      pdf.text(`Tahlil #${analysis.id} - ${new Date(analysis.created_at).toLocaleDateString("uz-UZ")}`, 15, yPosition);
-
-      // Summary
-      yPosition += 15;
-      pdf.setFontSize(14);
       pdf.setFont("helvetica", "bold");
-      pdf.text("Umumiy Ma'lumot", 15, yPosition);
-      
-      yPosition += 8;
+      pdf.text("Koʼkrak Saratoni Tahlili", horizontalMargin, 11);
+
+      yPosition = 28;
+      pdf.setTextColor(31, 41, 55);
+      pdf.setFontSize(11);
+      pdf.setFont("helvetica", "normal");
+      pdf.text(`Tahlil #${analysis.id} · ${new Date(analysis.created_at).toLocaleDateString("uz-UZ")}`, horizontalMargin, yPosition);
+
+      yPosition += 12;
+      pdf.setFontSize(13);
+      pdf.setFont("helvetica", "bold");
+      pdf.text("Umumiy maʼlumot", horizontalMargin, yPosition);
+
+      const detailLines = [
+        `Status: ${analysis.status}`,
+        `Jami topilmalar: ${analysis.total_findings}`,
+        `Asosiy kategoriya: ${analysis.dominant_category || "Nomaʼlum"}`,
+        `Asosiy label: ${analysis.dominant_label || "Nomaʼlum"}`,
+      ];
+
       pdf.setFontSize(10);
       pdf.setFont("helvetica", "normal");
-      pdf.text(`Status: ${analysis.status}`, 20, yPosition);
-      yPosition += 6;
-      pdf.text(`Jami Topilmalar: ${analysis.total_findings}`, 20, yPosition);
-      yPosition += 6;
-      pdf.text(`Asosiy Kategoriya: ${analysis.dominant_category || "N/A"}`, 20, yPosition);
-      yPosition += 6;
-      pdf.text(`Asosiy Label: ${analysis.dominant_label || "N/A"}`, 20, yPosition);
+      detailLines.forEach((line) => {
+        yPosition += 6;
+        pdf.text(line, horizontalMargin + 4, yPosition);
+      });
 
-      // Images
-      yPosition += 15;
-      pdf.setFontSize(14);
+      yPosition += 14;
+      pdf.setFontSize(13);
       pdf.setFont("helvetica", "bold");
-      pdf.text("Rasmlar va Topilmalar", 15, yPosition);
+      pdf.text("Rasmlar va topilmalar", horizontalMargin, yPosition);
 
-      for (let i = 0; i < analysis.images.length; i++) {
-        const img = analysis.images[i];
+      if (analysis.images.length === 0) {
+        yPosition += 10;
+        pdf.setFontSize(10);
+        pdf.setFont("helvetica", "normal");
+        pdf.text("Ushbu tahlil uchun rasm maʼlumotlari mavjud emas.", horizontalMargin, yPosition);
+      }
 
-        // Check if we need a new page
+      for (const img of analysis.images) {
         if (yPosition > pageHeight - 80) {
           pdf.addPage();
-          yPosition = 20;
+          yPosition = 24;
         }
 
-        yPosition += 10;
-        pdf.setFontSize(12);
+        yPosition += 8;
+        pdf.setFontSize(11);
         pdf.setFont("helvetica", "bold");
-        pdf.setTextColor(99, 102, 241);
-        pdf.text(img.view_type.toUpperCase(), 20, yPosition);
-        
+        pdf.setTextColor(79, 70, 229);
+        pdf.text(img.view_type.toUpperCase(), horizontalMargin, yPosition);
+
         yPosition += 6;
         pdf.setFontSize(10);
-        pdf.setTextColor(0, 0, 0);
         pdf.setFont("helvetica", "normal");
-        pdf.text(`Topilmalar: ${img.detections_count}`, 20, yPosition);
+        pdf.setTextColor(55, 65, 81);
+        pdf.text(`Topilmalar: ${img.detections_count}`, horizontalMargin, yPosition);
 
         try {
-          // Create canvas with image and detections
+          const assetUrl = getImageAssetUrl(img);
+          if (!assetUrl) {
+            console.warn(`No asset URL available for image ${img.id}`);
+            continue;
+          }
+
+          const imageElement = await loadImageForExport(assetUrl);
+          const originalWidth = imageElement.width || 1;
+          const originalHeight = imageElement.height || 1;
+          const maxCanvasWidth = 1100;
+          const scale = Math.min(1, maxCanvasWidth / originalWidth);
+          const canvasWidth = Math.max(Math.round(originalWidth * scale), 1);
+          const canvasHeight = Math.max(Math.round(originalHeight * scale), 1);
+
           const canvas = document.createElement("canvas");
-          const image = new Image();
-          image.crossOrigin = "anonymous";
-          
-          const imageUrl = getImageUrl(img);
-          
-          await new Promise((resolve, reject) => {
-            image.onload = resolve;
-            image.onerror = reject;
-            image.src = imageUrl;
-          });
-
-          // Set canvas size (max width for PDF)
-          const maxWidth = 800;
-          const scale = Math.min(1, maxWidth / image.width);
-          canvas.width = image.width * scale;
-          canvas.height = image.height * scale;
-
+          canvas.width = canvasWidth;
+          canvas.height = canvasHeight;
           const ctx = canvas.getContext("2d");
-          if (ctx) {
-            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-            // Draw detections
-            if (img.detections_data?.detections && img.detections_data.detections.length > 0) {
-              img.detections_data.detections.forEach((det: Detection) => {
-                const { x1, y1, x2, y2 } = det.bbox;
-                
-                // Scale bbox coordinates
-                const scaledX1 = x1 * scale;
-                const scaledY1 = y1 * scale;
-                const scaledX2 = x2 * scale;
-                const scaledY2 = y2 * scale;
-
-                // Draw box
-                ctx.strokeStyle = "#ef4444";
-                ctx.lineWidth = 3;
-                ctx.strokeRect(scaledX1, scaledY1, scaledX2 - scaledX1, scaledY2 - scaledY1);
-
-                // Draw label
-                const labelText = `${det.label} ${(det.confidence * 100).toFixed(0)}%`;
-                ctx.font = "bold 16px Arial";
-                const textMetrics = ctx.measureText(labelText);
-                
-                ctx.fillStyle = "#ef4444";
-                ctx.fillRect(scaledX1, scaledY1 - 25, textMetrics.width + 10, 25);
-                
-                ctx.fillStyle = "#ffffff";
-                ctx.fillText(labelText, scaledX1 + 5, scaledY1 - 7);
-              });
-            }
+          if (!ctx) {
+            throw new Error("Canvas tayyorlashda xatolik");
           }
 
-          // Add image to PDF
-          const imgData = canvas.toDataURL("image/jpeg", 0.8);
-          const imgWidth = pageWidth - 40;
-          const imgHeight = (canvas.height * imgWidth) / canvas.width;
+          ctx.drawImage(imageElement, 0, 0, canvasWidth, canvasHeight);
 
-          yPosition += 8;
-          
-          // Check if image fits on current page
-          if (yPosition + imgHeight > pageHeight - 20) {
-            pdf.addPage();
-            yPosition = 20;
-          }
+          if (img.detections_data?.detections?.length) {
+            const accentBackground = "rgba(15, 23, 42, 0.85)";
+            const paddingX = 6;
+            const labelHeight = 22;
 
-          pdf.addImage(imgData, "JPEG", 20, yPosition, imgWidth, imgHeight);
-          yPosition += imgHeight + 5;
+            img.detections_data.detections.forEach((det: Detection) => {
+              const { x1, y1, x2, y2 } = det.bbox;
+              const scaledX1 = x1 * scale;
+              const scaledY1 = y1 * scale;
+              const scaledX2 = x2 * scale;
+              const scaledY2 = y2 * scale;
+              const color = getCategoryColor(det.label);
 
-          // Add detections list
-          if (img.detections_data?.detections && img.detections_data.detections.length > 0) {
-            yPosition += 5;
-            pdf.setFontSize(10);
-            pdf.setFont("helvetica", "bold");
-            pdf.text("Topilmalar ro'yxati:", 20, yPosition);
-            
-            yPosition += 5;
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(9);
-            
-            img.detections_data.detections.forEach((det: Detection, idx: number) => {
-              if (yPosition > pageHeight - 15) {
-                pdf.addPage();
-                yPosition = 20;
-              }
-              pdf.text(
-                `${idx + 1}. ${det.label} - Aniqlik: ${(det.confidence * 100).toFixed(1)}%`,
-                25,
-                yPosition
-              );
-              yPosition += 5;
+              ctx.strokeStyle = color;
+              ctx.lineWidth = 3;
+              ctx.strokeRect(scaledX1, scaledY1, Math.max(scaledX2 - scaledX1, 1), Math.max(scaledY2 - scaledY1, 1));
+
+              const labelText = `${det.label} ${(det.confidence * 100).toFixed(0)}%`;
+              ctx.font = "600 15px 'Helvetica Neue', Helvetica, Arial, sans-serif";
+              const metrics = ctx.measureText(labelText);
+              const backgroundY = Math.max(scaledY1 - labelHeight - 2, 0);
+
+              ctx.fillStyle = color;
+              ctx.fillRect(scaledX1, backgroundY, 6, labelHeight);
+              ctx.fillStyle = accentBackground;
+              ctx.fillRect(scaledX1 + 6, backgroundY, metrics.width + paddingX * 2, labelHeight);
+
+              ctx.fillStyle = "#f8fafc";
+              ctx.fillText(labelText, scaledX1 + paddingX + 8, backgroundY + labelHeight - 6);
             });
           }
 
+          const imgWidth = pageWidth - horizontalMargin * 2;
+          const imgHeight = (canvasHeight * imgWidth) / canvasWidth;
+          yPosition += 8;
+
+          if (yPosition + imgHeight > pageHeight - 24) {
+            pdf.addPage();
+            yPosition = 24;
+          }
+
+          const imgData = canvas.toDataURL("image/jpeg", 0.92);
+          pdf.addImage(imgData, "JPEG", horizontalMargin, yPosition, imgWidth, imgHeight);
+          yPosition += imgHeight + 6;
+
+          if (img.detections_data?.detections?.length) {
+            pdf.setFontSize(10);
+            pdf.setFont("helvetica", "bold");
+            pdf.setTextColor(31, 41, 55);
+            pdf.text("Topilmalar roʼyxati:", horizontalMargin, yPosition);
+            pdf.setFont("helvetica", "normal");
+            pdf.setFontSize(9);
+
+            for (const [index, det] of img.detections_data.detections.entries()) {
+              if (yPosition > pageHeight - 18) {
+                pdf.addPage();
+                yPosition = 24;
+              }
+              yPosition += 5;
+              pdf.text(`${index + 1}. ${det.label} · ${(det.confidence * 100).toFixed(1)}%`, horizontalMargin + 4, yPosition);
+            }
+          }
         } catch (error) {
-          console.error(`Failed to load image ${img.id}:`, error);
+          console.error(`Failed to prepare image ${img.id}:`, error);
           yPosition += 10;
-          pdf.setTextColor(239, 68, 68);
-          pdf.text("Rasmni yuklashda xatolik", 20, yPosition);
-          pdf.setTextColor(0, 0, 0);
+          pdf.setFontSize(10);
+          pdf.setTextColor(220, 38, 38);
+          pdf.text("Rasmni eksport qilishda xatolik", horizontalMargin, yPosition);
+          pdf.setTextColor(31, 41, 55);
         }
 
         yPosition += 10;
       }
 
-      // Footer
       const totalPages = pdf.getNumberOfPages();
-      for (let i = 1; i <= totalPages; i++) {
-        pdf.setPage(i);
+      for (let pageIndex = 1; pageIndex <= totalPages; pageIndex += 1) {
+        pdf.setPage(pageIndex);
         pdf.setFontSize(8);
-        pdf.setTextColor(100, 100, 100);
-        pdf.text(
-          "Ko'krak Saratoni AI Diagnostika Tizimi",
-          pageWidth / 2,
-          pageHeight - 10,
-          { align: "center" }
-        );
-        pdf.text(
-          `Sahifa ${i} / ${totalPages} - ${new Date().toLocaleDateString("uz-UZ")}`,
-          pageWidth / 2,
-          pageHeight - 5,
-          { align: "center" }
-        );
+        pdf.setTextColor(100, 116, 139);
+        pdf.text("Koʼkrak saratoni AI diagnostika tizimi", pageWidth / 2, pageHeight - 11, { align: "center" });
+        pdf.text(`Sahifa ${pageIndex} / ${totalPages} · ${new Date().toLocaleDateString("uz-UZ")}`, pageWidth / 2, pageHeight - 6, { align: "center" });
       }
 
-      // Save PDF
       pdf.save(`tahlil_${analysis.id}_${new Date().toISOString().split("T")[0]}.pdf`);
-      
     } catch (error) {
       console.error("PDF export failed:", error);
-      alert("PDF yaratishda xatolik yuz berdi: " + (error as Error).message);
+      alert(`PDF yaratishda xatolik yuz berdi: ${(error as Error).message}`);
     } finally {
       setExporting(false);
     }
   };
+
 
   const drawDetections = () => {
     if (!canvasRef.current || !imageRef.current || !selectedImage) return;
@@ -425,10 +438,45 @@ export default function AnalysisDetailPage() {
     }
   };
 
+  const buildFileUrl = (path?: string | null) => {
+    if (!path) {
+      return null;
+    }
+
+    if (/^https?:\/\//i.test(path)) {
+      return path;
+    }
+
+    const trimmed = path.replace(/^\/+/, "");
+    const encoded = trimmed
+      .split("/")
+      .filter(Boolean)
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+
+    return `${API_BASE_URL}/files/${encoded}`;
+  };
+
+  const getImageAssetUrl = (image: AnalysisImage) => {
+    return buildFileUrl(image.thumbnail_path) ?? buildFileUrl(image.relative_path);
+  };
+
   const getImageUrl = (image: AnalysisImage) => {
-    // Backend serves files at /files/{path}
-    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
-    return `${baseUrl}/files/${image.relative_path}`;
+    return getImageAssetUrl(image) ?? IMAGE_PLACEHOLDER;
+  };
+
+  const handleImageError = (event: SyntheticEvent<HTMLImageElement>) => {
+    const target = event.currentTarget;
+    if (target.dataset.fallbackApplied === "true") {
+      return;
+    }
+
+    target.dataset.fallbackApplied = "true";
+    target.src = IMAGE_PLACEHOLDER;
+
+    if (target === imageRef.current) {
+      setImageLoaded(true);
+    }
   };
 
   if (loading) {
@@ -541,7 +589,7 @@ export default function AnalysisDetailPage() {
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-100 dark:bg-rose-500/20 border-2 border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 font-medium shadow-lg hover:shadow-xl transition-all"
               >
                 <Trash2 className="w-5 h-5" />
-                O'chirish
+                Oʼchirish
               </motion.button>
             </div>
           </div>
@@ -558,7 +606,7 @@ export default function AnalysisDetailPage() {
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
                   <Layers className="w-6 h-6 text-indigo-600" />
-                  Ko'p Ko'rinishli Tahlil
+                  Koʼp Koʼrinishli Tahlil
                 </h2>
                 <motion.button
                   whileHover={{ scale: 1.05 }}
@@ -600,6 +648,8 @@ export default function AnalysisDetailPage() {
                           src={getImageUrl(img)}
                           alt={viewType.toUpperCase()}
                           className="w-full h-full object-contain"
+                          crossOrigin="anonymous"
+                          onError={handleImageError}
                           onLoad={(e) => {
                             const imgElement = e.target as HTMLImageElement;
                             const canvasId = `multiview-canvas-${img.id}`;
@@ -773,6 +823,8 @@ export default function AnalysisDetailPage() {
                       ref={imageRef}
                       src={getImageUrl(selectedImage)}
                       alt={selectedImage.original_filename}
+                      crossOrigin="anonymous"
+                      onError={handleImageError}
                       onLoad={() => {
                         setImageLoaded(true);
                         drawDetections();
@@ -810,6 +862,8 @@ export default function AnalysisDetailPage() {
                           src={getImageUrl(img)}
                           alt={img.original_filename}
                           className="w-full h-full object-cover"
+                          crossOrigin="anonymous"
+                          onError={handleImageError}
                         />
                         {img.detections_count > 0 && (
                           <div className="absolute top-1 right-1 bg-rose-500 text-white text-xs font-bold px-2 py-1 rounded-full">
@@ -916,7 +970,7 @@ export default function AnalysisDetailPage() {
             <div className="bg-white/90 dark:bg-slate-900/50 rounded-2xl border-2 border-slate-200 dark:border-slate-700 shadow-xl p-6">
               <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
                 <Clock className="w-5 h-5 text-indigo-600" />
-                Vaqt chizig'i
+                Vaqt chizigʼi
               </h3>
 
               <div className="space-y-3">
@@ -973,12 +1027,12 @@ export default function AnalysisDetailPage() {
                 <div className="p-3 rounded-xl bg-rose-100 dark:bg-rose-500/20">
                   <Trash2 className="w-6 h-6 text-rose-600 dark:text-rose-400" />
                 </div>
-                <h3 className="text-2xl font-bold text-slate-800 dark:text-white">Tahlilni O'chirish</h3>
+                <h3 className="text-2xl font-bold text-slate-800 dark:text-white">Tahlilni Oʼchirish</h3>
               </div>
 
               <p className="text-slate-600 dark:text-neutral-400 mb-6">
-                Haqiqatan ham <strong>Tahlil #{analysis.id}</strong> ni o'chirmoqchimisiz? Bu amalni bekor qilib bo'lmaydi va
-                barcha rasmlar ham o'chiriladi.
+                Haqiqatan ham <strong>Tahlil #{analysis.id}</strong> ni oʼchirmoqchimisiz? Bu amalni bekor qilib boʼlmaydi va
+                barcha rasmlar ham oʼchiriladi.
               </p>
 
               <div className="flex gap-3">
@@ -988,7 +1042,7 @@ export default function AnalysisDetailPage() {
                   onClick={handleDelete}
                   className="flex-1 px-6 py-3 rounded-xl bg-gradient-to-r from-rose-500 to-red-500 text-white font-bold shadow-lg hover:shadow-xl transition-all"
                 >
-                  Ha, O'chirish
+                  Ha, Oʼchirish
                 </motion.button>
                 <motion.button
                   whileHover={{ scale: 1.05 }}

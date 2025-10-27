@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Search, Edit, Trash2, Users, Calendar, Phone, Mail, MapPin, Eye, Sparkles } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Calendar, Edit3, Eye, Mail, MapPin, Phone, Plus, Search, Trash2, Users } from "lucide-react";
+
 import { patientAPI } from "@/lib/api";
 
 type Patient = {
@@ -14,13 +15,25 @@ type Patient = {
   gender?: string | null;
   phone?: string | null;
   email?: string | null;
+  address?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 16 },
+  visible: (index = 0) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: index * 0.06, duration: 0.35, ease: "easeOut" },
+  }),
+  exit: { opacity: 0, scale: 0.95 },
 };
 
 export default function PatientsPage() {
   const router = useRouter();
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [totalPatients, setTotalPatients] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -28,305 +41,248 @@ export default function PatientsPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   useEffect(() => {
-    fetchPatients();
+    const fetchPatients = async () => {
+      try {
+        setLoading(true);
+        const data = await patientAPI.list({
+          skip: (page - 1) * 20,
+          limit: 20,
+          search: search || undefined,
+        });
+        setPatients(data.items || []);
+        setTotalPages(data.total_pages || 1);
+        setTotalPatients(data.total ?? data.items?.length ?? 0);
+      } catch (error) {
+        console.error("Failed to fetch patients", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void fetchPatients();
   }, [page, search]);
 
-  async function fetchPatients() {
-    setLoading(true);
-    try {
-      const data = await patientAPI.list({
-        skip: (page - 1) * 20,
-        limit: 20,
-        search: search || undefined,
-      });
-      setPatients(data.items || []);
-      setTotalPages(data.total_pages || 1);
-    } catch (error) {
-      console.error("Failed to fetch patients:", error);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const handleDelete = async (id: number) => {
+    if (!confirm("Haqiqatan ham ushbu bemorni o’chirmoqchimisiz?")) return;
 
-  async function handleDelete(id: number) {
-    if (!confirm("Bu bemorni o'chirmoqchimisiz?")) return;
-    
     try {
       setDeletingId(id);
       await patientAPI.delete(id);
-      fetchPatients();
+      setPatients((prev) => prev.filter((patient) => patient.id !== id));
+      setTotalPatients((prev) => Math.max(prev - 1, 0));
     } catch (error) {
-      console.error("Failed to delete patient:", error);
+      console.error("Failed to delete patient", error);
     } finally {
       setDeletingId(null);
     }
-  }
+  };
+
+  const formatDate = (value?: string | null) => {
+    if (!value) return "Mavjud emas";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString("uz-UZ");
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-emerald-50 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800 overflow-hidden">
-      {/* Animated Background */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-0 left-1/3 w-96 h-96 bg-emerald-300 dark:bg-emerald-500 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-20 dark:opacity-10 animate-blob"></div>
-        <div className="absolute top-1/2 right-1/3 w-96 h-96 bg-teal-300 dark:bg-teal-500 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-20 dark:opacity-10 animate-blob animation-delay-2000"></div>
-        <div className="absolute bottom-0 left-1/2 w-96 h-96 bg-cyan-300 dark:bg-cyan-500 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-20 dark:opacity-10 animate-blob animation-delay-4000"></div>
+    <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-24 -left-10 h-72 w-72 rounded-full bg-cyan-300/30 blur-3xl dark:bg-cyan-500/10"></div>
+        <div className="absolute top-1/3 -right-16 h-80 w-80 rounded-full bg-emerald-300/30 blur-3xl dark:bg-emerald-500/10"></div>
       </div>
 
-      <div className="relative z-10 p-8">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
-        >
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-4">
-              <motion.div
-                initial={{ scale: 0, rotate: -180 }}
-                animate={{ scale: 1, rotate: 0 }}
-                transition={{ type: "spring", stiffness: 200, delay: 0.2 }}
-                whileHover={{ scale: 1.15, rotate: 360 }}
-                className="p-4 rounded-2xl bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-500/20 dark:to-teal-500/20 border-2 border-emerald-200 dark:border-emerald-500/30 shadow-lg hover:shadow-emerald-300/50 dark:hover:shadow-emerald-500/30 transition-all duration-300"
-              >
-                <Users className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
-              </motion.div>
-              <div>
-                <h1 className="text-5xl font-bold bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 dark:from-emerald-400 dark:via-teal-400 dark:to-cyan-400 bg-clip-text text-transparent">
-                  Bemorlar
-                </h1>
-                <p className="text-slate-600 dark:text-slate-400 mt-1">Barcha bemorlar ma'lumotlari</p>
-              </div>
+      <div className="relative z-10 space-y-10 p-6 sm:p-8 lg:p-12">
+        <header className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-2"
+          >
+            <div className="inline-flex items-center gap-3 rounded-2xl border border-cyan-200 bg-white/80 px-4 py-2 shadow-sm backdrop-blur dark:border-cyan-500/30 dark:bg-slate-900/60">
+              <Users className="w-5 h-5 text-cyan-600 dark:text-cyan-300" />
+              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Jami bemorlar: {totalPatients}</span>
             </div>
+            <h1 className="text-3xl font-semibold text-slate-900 dark:text-white">Bemorlar boshqaruvi</h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Bemorlar ro’yxati, kontakt ma’lumotlari va ularning tahlil tarixini kuzatib boring.
+            </p>
+          </motion.div>
 
-            <motion.button
-              onClick={() => router.push("/patients/new")}
-              whileHover={{ scale: 1.08, y: -2 }}
-              whileTap={{ scale: 0.95 }}
-              className="group relative px-6 py-3 rounded-xl font-semibold overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300"
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-teal-500 transition-transform group-hover:scale-110"></div>
-              <div className="absolute inset-0 bg-gradient-to-r from-emerald-500 to-teal-600 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-              <div className="relative flex items-center gap-2 text-white">
-                <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
-                <span>Yangi Bemor</span>
-                <Sparkles className="w-4 h-4 group-hover:rotate-12 transition-transform duration-300" />
-              </div>
-            </motion.button>
-          </div>
-        </motion.div>
+          <motion.button
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => router.push("/patients/new")}
+            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-5 py-3 text-sm font-semibold text-white shadow-lg hover:shadow-xl"
+          >
+            <Plus className="w-4 h-4" />
+            Yangi bemor qo’shish
+          </motion.button>
+        </header>
 
-        {/* Search Bar */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="mb-6 relative group"
+          className="relative"
         >
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 dark:text-slate-400 group-focus-within:text-emerald-500 dark:group-focus-within:text-emerald-400 transition-colors group-focus-within:scale-110" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Bemor nomi yoki tibbiy kartasi bo'yicha qidirish..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-12 pr-4 py-4 bg-white/80 dark:bg-slate-800/70 border-2 border-cyan-200 dark:border-slate-600 rounded-xl focus:border-emerald-400 dark:focus:border-emerald-500/50 focus:ring-4 focus:ring-emerald-200 dark:focus:ring-emerald-500/20 outline-none transition-all backdrop-blur-sm text-lg text-slate-900 dark:text-white shadow-md focus:shadow-xl"
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Bemor nomi yoki tibbiy karta raqami bo’yicha qidirish..."
+            className="w-full rounded-2xl border border-slate-200 bg-white/90 px-12 py-3 text-sm text-slate-700 shadow-sm backdrop-blur focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:focus:border-cyan-400"
           />
         </motion.div>
 
-        {/* Patients Grid */}
         {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="h-48 bg-gradient-to-br from-cyan-100 to-emerald-100 dark:from-slate-700 dark:to-slate-600 rounded-2xl animate-pulse shadow-md"></div>
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div
+                key={index}
+                className="h-48 animate-pulse rounded-3xl border border-slate-200/70 bg-white/70 shadow-sm dark:border-slate-700 dark:bg-slate-900/60"
+              ></div>
             ))}
           </div>
         ) : patients.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="text-center py-20"
-          >
-            <Users className="w-20 h-20 mx-auto mb-6 text-slate-400 dark:text-slate-600" />
-            <p className="text-slate-600 dark:text-slate-400 text-xl mb-2 font-semibold">Bemorlar topilmadi</p>
-            <p className="text-slate-500 dark:text-slate-500">Yangi bemor qo'shishdan boshlang</p>
-          </motion.div>
+          <div className="flex flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-slate-200 bg-white/80 p-12 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+            <Users className="w-12 h-12 text-slate-400" />
+            <div>
+              <h2 className="text-lg font-semibold text-slate-700 dark:text-slate-200">Bemorlar topilmadi</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Qidiruv mezonlarini o’zgartirib ko'ring yoki yangi bemor qo’shing.</p>
+            </div>
+          </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
             <AnimatePresence>
               {patients.map((patient, index) => (
-                <motion.div
+                <motion.article
                   key={patient.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ delay: index * 0.05 }}
-                  whileHover={{ y: -10, scale: 1.03, rotate: 1 }}
-                  className="group relative"
+                  custom={index}
+                  variants={cardVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  whileHover={{ translateY: -6 }}
+                  className="flex h-full flex-col justify-between rounded-3xl border border-slate-200/60 bg-white/90 p-6 shadow-md backdrop-blur transition hover:shadow-xl dark:border-slate-700 dark:bg-slate-900/70"
                 >
-                  <div className="absolute inset-0 bg-gradient-to-br from-emerald-200/30 via-cyan-200/30 to-teal-200/30 dark:from-emerald-500/0 dark:via-emerald-500/5 dark:to-teal-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-2xl blur-xl"></div>
-                  
-                  <div className="relative p-6 bg-white/80 dark:bg-slate-800/80 border-2 border-cyan-200 dark:border-slate-600 group-hover:border-emerald-300 dark:group-hover:border-emerald-500/50 rounded-2xl backdrop-blur-xl transition-all duration-300 shadow-lg hover:shadow-2xl">
-                    {/* Header */}
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <motion.div 
-                          whileHover={{ scale: 1.1, rotate: 360 }}
-                          transition={{ duration: 0.6 }}
-                          className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white font-bold text-lg shadow-md"
-                        >
-                          {patient.full_name.charAt(0).toUpperCase()}
-                        </motion.div>
-                        <div>
-                          <h3 className="text-xl font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
-                            {patient.full_name}
-                          </h3>
-                          {patient.medical_record_number && (
-                            <p className="text-sm text-slate-600 dark:text-slate-400">MRN: {patient.medical_record_number}</p>
-                          )}
-                        </div>
+                  <div className="space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{patient.full_name}</h3>
+                        {patient.medical_record_number && (
+                          <p className="text-xs font-medium text-cyan-600 dark:text-cyan-300">MRN: {patient.medical_record_number}</p>
+                        )}
+                      </div>
+                      <div className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-medium text-cyan-600 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300">
+                        {formatDate(patient.created_at)}
                       </div>
                     </div>
 
-                    {/* Details */}
-                    <div className="space-y-2 mb-4 text-sm">
+                    <div className="space-y-3 text-sm text-slate-600 dark:text-slate-300">
                       {patient.date_of_birth && (
-                        <motion.div 
-                          whileHover={{ x: 5 }}
-                          className="flex items-center gap-2 text-slate-700 dark:text-slate-300"
-                        >
-                          <Calendar className="w-4 h-4 text-emerald-500" />
-                          <span>{new Date(patient.date_of_birth).toLocaleDateString("uz-UZ")}</span>
-                        </motion.div>
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-slate-400" />
+                          <span>{formatDate(patient.date_of_birth)}</span>
+                        </div>
                       )}
                       {patient.phone && (
-                        <motion.div 
-                          whileHover={{ x: 5 }}
-                          className="flex items-center gap-2 text-slate-700 dark:text-slate-300"
-                        >
-                          <Phone className="w-4 h-4 text-cyan-500" />
+                        <div className="flex items-center gap-2">
+                          <Phone className="w-4 h-4 text-slate-400" />
                           <span>{patient.phone}</span>
-                        </motion.div>
+                        </div>
                       )}
                       {patient.email && (
-                        <motion.div 
-                          whileHover={{ x: 5 }}
-                          className="flex items-center gap-2 text-slate-700 dark:text-slate-300"
-                        >
-                          <Mail className="w-4 h-4 text-blue-500" />
-                          <span className="truncate">{patient.email}</span>
-                        </motion.div>
-                      )}
-                      {patient.gender && (
                         <div className="flex items-center gap-2">
-                          <span className="px-3 py-1 rounded-full text-xs bg-gradient-to-r from-cyan-100 to-blue-100 dark:from-cyan-500/20 dark:to-blue-500/20 text-cyan-700 dark:text-cyan-300 border-2 border-cyan-200 dark:border-cyan-500/30 font-medium">
-                            {patient.gender}
-                          </span>
+                          <Mail className="w-4 h-4 text-slate-400" />
+                          <span className="truncate">{patient.email}</span>
+                        </div>
+                      )}
+                      {patient.address && (
+                        <div className="flex items-start gap-2">
+                          <MapPin className="mt-0.5 w-4 h-4 text-slate-400" />
+                          <span className="line-clamp-2">{patient.address}</span>
                         </div>
                       )}
                     </div>
+                  </div>
 
-                    {/* Footer */}
-                    <div className="flex items-center justify-between pt-4 border-t-2 border-cyan-100 dark:border-slate-700">
-                      <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">
-                        Qo'shilgan: {new Date(patient.created_at).toLocaleDateString("uz-UZ")}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <motion.button
-                          whileHover={{ scale: 1.1, rotate: 5 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => router.push(`/patients/${patient.id}`)}
-                          className="p-2 rounded-lg bg-gradient-to-r from-cyan-100 to-blue-100 dark:from-cyan-500/20 dark:to-blue-500/20 border-2 border-cyan-200 dark:border-cyan-500/30 text-cyan-700 dark:text-cyan-400 hover:from-cyan-200 hover:to-blue-200 dark:hover:from-cyan-500/30 dark:hover:to-blue-500/30 transition-all shadow-md"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </motion.button>
-                        <motion.button
-                          whileHover={{ scale: 1.1, rotate: 5 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => router.push(`/patients/${patient.id}/edit`)}
-                          className="p-2 rounded-lg bg-gradient-to-r from-emerald-100 to-teal-100 dark:from-emerald-500/20 dark:to-teal-500/20 border-2 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:from-emerald-200 hover:to-teal-200 dark:hover:from-emerald-500/30 dark:hover:to-teal-500/30 transition-all shadow-md"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </motion.button>
-                        <motion.button
-                          whileHover={{ scale: 1.1, rotate: -5 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => handleDelete(patient.id)}
-                          disabled={deletingId === patient.id}
-                          className="p-2 rounded-lg bg-gradient-to-r from-rose-100 to-pink-100 dark:from-rose-500/20 dark:to-pink-500/20 border-2 border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-400 hover:from-rose-200 hover:to-pink-200 dark:hover:from-rose-500/30 dark:hover:to-pink-500/30 transition-all disabled:opacity-50 shadow-md"
-                        >
-                          {deletingId === patient.id ? (
-                            <div className="w-4 h-4 border-2 border-rose-500 border-t-transparent rounded-full animate-spin"></div>
-                          ) : (
-                            <Trash2 className="w-4 h-4" />
-                          )}
-                        </motion.button>
-                      </div>
+                  <div className="mt-6 flex items-center justify-between gap-2 border-t border-slate-200/60 pt-4 dark:border-slate-700">
+                    <button
+                      onClick={() => router.push(`/patients/${patient.id}`)}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-cyan-400 hover:text-cyan-600 dark:border-slate-600 dark:text-slate-300 dark:hover:border-cyan-400 dark:hover:text-cyan-300"
+                    >
+                      <Eye className="w-4 h-4" />
+                      Profil
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => router.push(`/patients/${patient.id}/edit`)}
+                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-emerald-400 hover:text-emerald-600 dark:border-slate-600 dark:text-slate-300 dark:hover:border-emerald-400 dark:hover:text-emerald-300"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                        Tahrirlash
+                      </button>
+                      <button
+                        onClick={() => handleDelete(patient.id)}
+                        disabled={deletingId === patient.id}
+                        className="inline-flex items-center gap-2 rounded-xl border border-rose-200 px-3 py-2 text-xs font-medium text-rose-600 transition hover:border-rose-400 disabled:opacity-50 dark:border-rose-500/40 dark:text-rose-300"
+                      >
+                        {deletingId === patient.id ? <LoaderSpinner /> : <Trash2 className="w-4 h-4" />}
+                        O’chirish
+                      </button>
                     </div>
                   </div>
-                </motion.div>
+                </motion.article>
               ))}
             </AnimatePresence>
           </div>
         )}
 
-        {/* Pagination */}
         {totalPages > 1 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="mt-8 flex items-center justify-center gap-2"
-          >
+          <div className="flex items-center justify-center gap-2 pt-4">
             <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
+              onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
               disabled={page === 1}
-              className="px-4 py-2 rounded-lg bg-neutral-900/50 border border-neutral-800 text-white hover:border-emerald-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-cyan-400 hover:text-cyan-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-300"
             >
               Oldingi
             </button>
             <div className="flex items-center gap-2">
-              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                const pageNum = i + 1;
-                return (
+              {Array.from({ length: totalPages }, (_, index) => index + 1)
+                .slice(Math.max(0, page - 3), Math.max(0, page - 3) + 5)
+                .map((pageNumber) => (
                   <button
-                    key={pageNum}
-                    onClick={() => setPage(pageNum)}
-                    className={`w-10 h-10 rounded-lg font-semibold transition-all ${
-                      page === pageNum
-                        ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg"
-                        : "bg-neutral-900/50 border border-neutral-800 text-neutral-400 hover:border-emerald-500/50"
+                    key={pageNumber}
+                    onClick={() => setPage(pageNumber)}
+                    className={`h-9 w-9 rounded-xl text-xs font-semibold transition ${
+                      pageNumber === page
+                        ? "bg-gradient-to-r from-cyan-500 to-emerald-500 text-white shadow"
+                        : "border border-slate-200 bg-white text-slate-600 hover:border-cyan-400 hover:text-cyan-600 dark:border-slate-600 dark:bg-slate-900/60 dark:text-slate-300"
                     }`}
                   >
-                    {pageNum}
+                    {pageNumber}
                   </button>
-                );
-              })}
+                ))}
             </div>
             <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              onClick={() => setPage((prev) => Math.min(prev + 1, totalPages))}
               disabled={page === totalPages}
-              className="px-4 py-2 rounded-lg bg-neutral-900/50 border border-neutral-800 text-white hover:border-emerald-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-cyan-400 hover:text-cyan-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-300"
             >
               Keyingi
             </button>
-          </motion.div>
+          </div>
         )}
       </div>
-
-      <style jsx global>{`
-        @keyframes blob {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(30px, -50px) scale(1.1); }
-          66% { transform: translate(-20px, 20px) scale(0.9); }
-        }
-        .animate-blob {
-          animation: blob 7s infinite;
-        }
-        .animation-delay-2000 {
-          animation-delay: 2s;
-        }
-        .animation-delay-4000 {
-          animation-delay: 4s;
-        }
-      `}</style>
     </div>
   );
+}
+
+function LoaderSpinner() {
+  return <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>;
 }

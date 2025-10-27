@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { TrendingUp, BarChart3, PieChart, Activity, Calendar, AlertCircle, CheckCircle, Clock, Users, FileText, Image as ImageIcon, RefreshCw } from "lucide-react";
 import { LineChart, Line, BarChart, Bar, PieChart as RePieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from "recharts";
 import { statisticsAPI } from "@/lib/api";
+import { useTheme } from "@/contexts/ThemeContext";
 
 type Statistics = {
   total_patients: number;
@@ -17,6 +18,14 @@ type Statistics = {
   total_images: number;
 };
 
+const RADIAN = Math.PI / 180;
+const STATUS_COLORS = ["#22c55e", "#38bdf8", "#f59e0b", "#ef4444"];
+const FINDINGS_COLORS = {
+  normal: "#10b981",
+  benign: "#f59e0b",
+  malignant: "#ef4444",
+};
+
 export default function StatisticsPage() {
   const [stats, setStats] = useState<Statistics | null>(null);
   const [trends, setTrends] = useState<any>(null);
@@ -25,6 +34,15 @@ export default function StatisticsPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "trends" | "findings">("overview");
   const [trendDays, setTrendDays] = useState<number>(30);
+
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+  const axisColor = isDark ? "#e2e8f0" : "#475569";
+  const gridColor = isDark ? "#1f2937" : "#e2e8f0";
+  const legendColor = isDark ? "#cbd5f5" : "#475569";
+  const tooltipBg = isDark ? "rgba(15,23,42,0.92)" : "#ffffff";
+  const tooltipBorder = isDark ? "#1f2937" : "#e0e7ff";
+  const tooltipText = isDark ? "#f8fafc" : "#1e293b";
 
   useEffect(() => {
     loadData();
@@ -44,7 +62,7 @@ export default function StatisticsPage() {
       setFindings(findingsData);
     } catch (error: any) {
       console.error("Failed to load statistics:", error);
-      setError(error.message || "Ma'lumotlarni yuklashda xatolik yuz berdi");
+      setError(error.message || "Maʼlumotlarni yuklashda xatolik yuz berdi");
     } finally {
       setLoading(false);
     }
@@ -55,8 +73,6 @@ export default function StatisticsPage() {
     loadData(days);
   };
 
-  const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#eab308'];
-
   const statCards = stats ? [
     { label: "Jami Bemorlar", value: stats.total_patients, icon: Activity, color: "from-blue-500 to-indigo-500", change: "+12%" },
     { label: "Jami Tahlillar", value: stats.total_analyses, icon: BarChart3, color: "from-purple-500 to-pink-500", change: "+8%" },
@@ -65,6 +81,65 @@ export default function StatisticsPage() {
     { label: "Xatoliklar", value: stats.failed_analyses, icon: AlertCircle, color: "from-red-500 to-rose-500", change: "-5%" },
     { label: "Topilmalar", value: stats.total_findings, icon: TrendingUp, color: "from-cyan-500 to-blue-500", change: "+20%" },
   ] : [];
+
+  const statusPieData = [
+    { name: "Bajarilgan", value: stats?.completed_analyses ?? 0, color: STATUS_COLORS[0] },
+    { name: "Jarayonda", value: stats?.processing_analyses ?? 0, color: STATUS_COLORS[1] },
+    { name: "Kutilmoqda", value: stats?.pending_analyses ?? 0, color: STATUS_COLORS[2] },
+    { name: "Xato", value: stats?.failed_analyses ?? 0, color: STATUS_COLORS[3] },
+  ];
+
+  const findingsPieData = [
+    { name: "Normal", value: findings?.normal ?? 0, color: FINDINGS_COLORS.normal },
+    { name: "Benign", value: findings?.benign ?? 0, color: FINDINGS_COLORS.benign },
+    { name: "Malignant", value: findings?.malignant ?? 0, color: FINDINGS_COLORS.malignant },
+  ];
+
+  const renderStatusLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: any) => {
+    if (percent === 0 || percent === undefined || percent === null) {
+      return null;
+    }
+    const radius = (outerRadius ?? 0) + 20;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill={axisColor}
+        textAnchor={x > cx ? "start" : "end"}
+        dominantBaseline="middle"
+        fontSize={12}
+        fontWeight={600}
+      >
+        {`${name} ${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
+
+  const renderFindingsLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: any) => {
+    if (percent === 0 || percent === undefined || percent === null) {
+      return null;
+    }
+    const radius = (outerRadius ?? 0) + 18;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill={axisColor}
+        textAnchor={x > cx ? "start" : "end"}
+        dominantBaseline="middle"
+        fontSize={12}
+        fontWeight={600}
+      >
+        {`${name} ${(percent * 100).toFixed(1)}%`}
+      </text>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 dark:from-neutral-950 dark:via-purple-950/10 dark:to-neutral-950">
@@ -95,7 +170,7 @@ export default function StatisticsPage() {
                 <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 dark:from-blue-400 dark:via-purple-400 dark:to-pink-400 bg-clip-text text-transparent">
                   Statistika
                 </h1>
-                <p className="text-slate-600 dark:text-neutral-400">Tizim ko'rsatkichlari va tahlillar</p>
+                <p className="text-slate-600 dark:text-neutral-400">Tizim koʼrsatkichlari va tahlillar</p>
               </div>
             </div>
             <motion.button
@@ -228,25 +303,38 @@ export default function StatisticsPage() {
                     <ResponsiveContainer width="100%" height={300}>
                       <RePieChart>
                         <Pie
-                          data={[
-                            { name: "Bajarilgan", value: stats?.completed_analyses || 0 },
-                            { name: "Kutilmoqda", value: stats?.pending_analyses || 0 },
-                            { name: "Jarayonda", value: stats?.processing_analyses || 0 },
-                            { name: "Xato", value: stats?.failed_analyses || 0 },
-                          ]}
+                          data={statusPieData}
                           cx="50%"
                           cy="50%"
-                          labelLine={false}
-                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                          outerRadius={100}
-                          fill="#8884d8"
+                          innerRadius={50}
+                          outerRadius={110}
+                          paddingAngle={3}
                           dataKey="value"
+                          labelLine={false}
+                          label={renderStatusLabel}
                         >
-                          {COLORS.map((color, index) => (
-                            <Cell key={`cell-${index}`} fill={color} />
+                          {statusPieData.map((entry, index) => (
+                            <Cell key={`status-${index}`} fill={entry.color} strokeWidth={0} />
                           ))}
                         </Pie>
-                        <Tooltip />
+                        <Tooltip
+                          cursor={{ fill: isDark ? "rgba(148, 163, 184, 0.1)" : "rgba(148, 163, 184, 0.2)" }}
+                          contentStyle={{
+                            backgroundColor: tooltipBg,
+                            borderRadius: "0.75rem",
+                            border: `1px solid ${tooltipBorder}`,
+                            color: tooltipText,
+                            boxShadow: "0 12px 32px rgba(15, 23, 42, 0.18)",
+                          }}
+                          itemStyle={{ color: tooltipText, fontWeight: 600 }}
+                        />
+                        <Legend
+                          verticalAlign="bottom"
+                          height={36}
+                          formatter={(value: string) => (
+                            <span style={{ color: legendColor, fontSize: 12 }}>{value}</span>
+                          )}
+                        />
                       </RePieChart>
                     </ResponsiveContainer>
                   </motion.div>
@@ -262,12 +350,12 @@ export default function StatisticsPage() {
                       <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 shadow-lg">
                         <Activity className="w-5 h-5 text-white" />
                       </div>
-                      Tezkor Ma'lumotlar
+                      Tezkor Maʼlumotlar
                     </h3>
                     <div className="space-y-3">
                       {[
-                        { label: "O'rtacha tahlillar/bemor", value: stats ? (stats.total_analyses / stats.total_patients || 0).toFixed(1) : "0", color: "from-blue-500 to-cyan-500" },
-                        { label: "O'rtacha topilmalar/tahlil", value: stats ? (stats.total_findings / stats.total_analyses || 0).toFixed(1) : "0", color: "from-purple-500 to-pink-500" },
+                        { label: "Oʼrtacha tahlillar/bemor", value: stats ? (stats.total_analyses / stats.total_patients || 0).toFixed(1) : "0", color: "from-blue-500 to-cyan-500" },
+                        { label: "Oʼrtacha topilmalar/tahlil", value: stats ? (stats.total_findings / stats.total_analyses || 0).toFixed(1) : "0", color: "from-purple-500 to-pink-500" },
                         { label: "Muvaffaqiyat darajasi", value: stats ? `${((stats.completed_analyses / stats.total_analyses || 0) * 100).toFixed(1)}%` : "0%", color: "from-emerald-500 to-teal-500" },
                         { label: "Jami rasmlar", value: stats?.total_images ? stats.total_images.toLocaleString() : "0", color: "from-amber-500 to-orange-500" },
                       ].map((item, index) => (
@@ -323,11 +411,14 @@ export default function StatisticsPage() {
                   </div>
                 </div>
                 <ResponsiveContainer width="100%" height={400}>
-                  <AreaChart data={trends.labels?.map((label: string, index: number) => ({
-                    date: label,
-                    analyses: trends.analyses?.[index] || 0,
-                    findings: trends.findings?.[index] || 0,
-                  })) || []}>
+                  <AreaChart
+                    data={trends.labels?.map((label: string, index: number) => ({
+                      date: label,
+                      analyses: trends.analyses?.[index] || 0,
+                      findings: trends.findings?.[index] || 0,
+                    })) || []}
+                    margin={{ top: 20, right: 30, left: 0, bottom: 0 }}
+                  >
                     <defs>
                       <linearGradient id="colorAnalyses" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#6366f1" stopOpacity={0.8}/>
@@ -338,20 +429,21 @@ export default function StatisticsPage() {
                         <stop offset="95%" stopColor="#ec4899" stopOpacity={0.1}/>
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e0e7ff" className="dark:stroke-neutral-700" />
-                    <XAxis dataKey="date" stroke="#64748b" className="dark:stroke-neutral-400" />
-                    <YAxis stroke="#64748b" className="dark:stroke-neutral-400" />
+                    <CartesianGrid strokeDasharray="3 3" stroke={gridColor} opacity={0.5} />
+                    <XAxis dataKey="date" tick={{ fill: axisColor, fontSize: 12 }} axisLine={{ stroke: gridColor }} tickLine={{ stroke: gridColor }} />
+                    <YAxis tick={{ fill: axisColor, fontSize: 12 }} axisLine={{ stroke: gridColor }} tickLine={{ stroke: gridColor }} />
                     <Tooltip
+                      cursor={{ stroke: STATUS_COLORS[1], strokeWidth: 1 }}
                       contentStyle={{
-                        backgroundColor: 'white',
-                        border: '2px solid #e0e7ff',
-                        borderRadius: '0.75rem',
-                        color: '#1e293b',
-                        boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'
+                        backgroundColor: tooltipBg,
+                        borderRadius: "0.75rem",
+                        border: `1px solid ${tooltipBorder}`,
+                        color: tooltipText,
+                        boxShadow: "0 12px 32px rgba(15, 23, 42, 0.18)",
                       }}
-                      itemStyle={{ color: '#1e293b' }}
+                      itemStyle={{ color: tooltipText, fontWeight: 600 }}
                     />
-                    <Legend wrapperStyle={{ color: '#64748b' }} />
+                    <Legend wrapperStyle={{ color: legendColor }} iconType="circle" iconSize={10} />
                     <Area type="monotone" dataKey="analyses" stroke="#6366f1" fillOpacity={1} fill="url(#colorAnalyses)" strokeWidth={3} />
                     <Area type="monotone" dataKey="findings" stroke="#ec4899" fillOpacity={1} fill="url(#colorFindings)" strokeWidth={3} />
                   </AreaChart>
@@ -372,34 +464,27 @@ export default function StatisticsPage() {
                     <div className="p-3 rounded-xl bg-gradient-to-br from-pink-500 to-rose-500 shadow-lg">
                       <BarChart3 className="w-6 h-6 text-white" />
                     </div>
-                    Kategoriya bo'yicha Tahlillar
+                    Kategoriya boʼyicha Tahlillar
                   </h3>
                   <ResponsiveContainer width="100%" height={350}>
-                    <BarChart data={[
-                      { category: "Normal", count: findings.normal || 0, color: "#10b981" },
-                      { category: "Benign", count: findings.benign || 0, color: "#f59e0b" },
-                      { category: "Malignant", count: findings.malignant || 0, color: "#ef4444" },
-                    ]}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e0e7ff" className="dark:stroke-neutral-700" />
-                      <XAxis dataKey="category" stroke="#64748b" className="dark:stroke-neutral-400" />
-                      <YAxis stroke="#64748b" className="dark:stroke-neutral-400" />
+                    <BarChart data={findingsPieData.map(({ name, value, color }) => ({ category: name, count: value, color }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={gridColor} opacity={0.5} />
+                      <XAxis dataKey="category" tick={{ fill: axisColor, fontSize: 12 }} axisLine={{ stroke: gridColor }} tickLine={{ stroke: gridColor }} />
+                      <YAxis tick={{ fill: axisColor, fontSize: 12 }} axisLine={{ stroke: gridColor }} tickLine={{ stroke: gridColor }} />
                       <Tooltip
+                        cursor={{ fill: isDark ? "rgba(148, 163, 184, 0.12)" : "rgba(148, 163, 184, 0.18)" }}
                         contentStyle={{
-                          backgroundColor: 'white',
-                          border: '2px solid #e0e7ff',
-                          borderRadius: '0.75rem',
-                          color: '#1e293b',
-                          boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'
+                          backgroundColor: tooltipBg,
+                          borderRadius: "0.75rem",
+                          border: `1px solid ${tooltipBorder}`,
+                          color: tooltipText,
+                          boxShadow: "0 12px 32px rgba(15, 23, 42, 0.18)",
                         }}
-                        itemStyle={{ color: '#1e293b' }}
+                        itemStyle={{ color: tooltipText, fontWeight: 600 }}
                       />
                       <Bar dataKey="count" radius={[8, 8, 0, 0]}>
-                        {[
-                          { category: "Normal", count: findings.normal || 0, color: "#10b981" },
-                          { category: "Benign", count: findings.benign || 0, color: "#f59e0b" },
-                          { category: "Malignant", count: findings.malignant || 0, color: "#ef4444" },
-                        ].map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        {findingsPieData.map((entry, index) => (
+                          <Cell key={`finding-${index}`} fill={entry.color} />
                         ))}
                       </Bar>
                     </BarChart>
@@ -418,27 +503,38 @@ export default function StatisticsPage() {
                     <ResponsiveContainer width="100%" height={300}>
                       <RePieChart>
                         <Pie
-                          data={[
-                            { name: "Normal", value: findings.normal || 0, color: "#10b981" },
-                            { name: "Benign", value: findings.benign || 0, color: "#f59e0b" },
-                            { name: "Malignant", value: findings.malignant || 0, color: "#ef4444" },
-                          ]}
+                          data={findingsPieData}
                           cx="50%"
                           cy="50%"
-                          labelLine={false}
-                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
-                          outerRadius={100}
+                          innerRadius={55}
+                          outerRadius={115}
+                          paddingAngle={4}
                           dataKey="value"
+                          labelLine={false}
+                          label={renderFindingsLabel}
                         >
-                          {[
-                            { name: "Normal", value: findings.normal || 0, color: "#10b981" },
-                            { name: "Benign", value: findings.benign || 0, color: "#f59e0b" },
-                            { name: "Malignant", value: findings.malignant || 0, color: "#ef4444" },
-                          ].map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          {findingsPieData.map((entry, index) => (
+                            <Cell key={`findings-${index}`} fill={entry.color} strokeWidth={0} />
                           ))}
                         </Pie>
-                        <Tooltip />
+                        <Tooltip
+                          cursor={{ fill: isDark ? "rgba(148, 163, 184, 0.1)" : "rgba(148, 163, 184, 0.18)" }}
+                          contentStyle={{
+                            backgroundColor: tooltipBg,
+                            borderRadius: "0.75rem",
+                            border: `1px solid ${tooltipBorder}`,
+                            color: tooltipText,
+                            boxShadow: "0 12px 32px rgba(15, 23, 42, 0.18)",
+                          }}
+                          itemStyle={{ color: tooltipText, fontWeight: 600 }}
+                        />
+                        <Legend
+                          verticalAlign="bottom"
+                          height={36}
+                          formatter={(value: string) => (
+                            <span style={{ color: legendColor, fontSize: 12 }}>{value}</span>
+                          )}
+                        />
                       </RePieChart>
                     </ResponsiveContainer>
 

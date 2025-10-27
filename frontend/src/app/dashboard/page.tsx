@@ -2,8 +2,55 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Users, Activity, Clock, AlertCircle, TrendingUp, Brain, Zap, Star, ArrowUpRight } from "lucide-react";
-import { statisticsAPI } from "@/lib/api";
+import {
+  Users,
+  Activity,
+  Clock,
+  AlertCircle,
+  TrendingUp,
+  Brain,
+  Zap,
+  Star,
+  ArrowUpRight,
+  Loader2,
+  CheckCircle2,
+  RefreshCw,
+} from "lucide-react";
+import { statisticsAPI, systemAPI } from "@/lib/api";
+
+type ServiceStatus = "online" | "offline" | "degraded";
+
+type ServiceState = {
+  id: string;
+  label: string;
+  description: string;
+  status: ServiceStatus;
+};
+
+const SERVICE_ITEMS: Array<Omit<ServiceState, "status">> = [
+  { id: "api", label: "API server", description: "FastAPI asosiy xizmat" },
+  { id: "database", label: "Maʼlumotlar bazasi", description: "PostgreSQL maʼlumotlar ombori" },
+  { id: "model", label: "AI modeli", description: "YOLO asosidagi tahlil xizmati" },
+  { id: "storage", label: "Fayl saqlash", description: "Rasm va hisobot fayllari" },
+];
+
+const STATUS_STYLES: Record<ServiceStatus, { badge: string; dot: string; label: string }> = {
+  online: {
+    badge: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300",
+    dot: "bg-emerald-500",
+    label: "Faol",
+  },
+  degraded: {
+    badge: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300",
+    dot: "bg-amber-500",
+    label: "Cheklangan",
+  },
+  offline: {
+    badge: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300",
+    dot: "bg-rose-500",
+    label: "Uzilgan",
+  },
+};
 
 type Statistics = {
   total_patients: number;
@@ -19,9 +66,20 @@ type Statistics = {
 export default function DashboardPage() {
   const [stats, setStats] = useState<Statistics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [serviceStates, setServiceStates] = useState<ServiceState[]>(() =>
+    SERVICE_ITEMS.map((item) => ({ ...item, status: "online" }))
+  );
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   useEffect(() => {
     loadStatistics();
+    void checkSystemStatus();
+    const interval = setInterval(() => {
+      void checkSystemStatus();
+    }, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadStatistics = async () => {
@@ -35,14 +93,30 @@ export default function DashboardPage() {
     }
   };
 
+  async function checkSystemStatus() {
+    try {
+      setCheckingStatus(true);
+      await systemAPI.health();
+      setServiceStates(SERVICE_ITEMS.map((item) => ({ ...item, status: "online" })));
+      setStatusError(null);
+    } catch (error) {
+      console.error("Failed to check system status:", error);
+      setServiceStates(SERVICE_ITEMS.map((item) => ({ ...item, status: "offline" })));
+      setStatusError("Backend bilan aloqa mavjud emas.");
+    } finally {
+      setLastChecked(new Date());
+      setCheckingStatus(false);
+    }
+  }
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-blue-50 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800 p-8">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-8">
         <div className="animate-pulse space-y-8">
-          <div className="h-12 bg-gradient-to-r from-cyan-200 to-blue-200 dark:from-slate-700 dark:to-slate-600 rounded-xl w-1/3 animate-shimmer"></div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="h-12 w-1/3 rounded-xl bg-slate-200 dark:bg-slate-800"></div>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-40 bg-gradient-to-br from-cyan-100 to-blue-100 dark:from-slate-700 dark:to-slate-600 rounded-2xl animate-pulse"></div>
+              <div key={i} className="h-40 rounded-2xl bg-white/70 dark:bg-slate-900"></div>
             ))}
           </div>
         </div>
@@ -51,298 +125,412 @@ export default function DashboardPage() {
   }
 
   const statCards = [
-    { 
-      label: "Jami Bemorlar", 
-      value: stats?.total_patients || 0, 
-      icon: Users, 
-      color: "from-cyan-400 to-blue-500",
-      bgGlow: "from-cyan-400/20 to-blue-500/20",
-      change: "+12.5%",
-      trend: "up"
+    {
+      label: "Jami Bemorlar",
+      value: stats?.total_patients || 0,
+      icon: Users,
+      color: "from-cyan-500 to-blue-500",
+      change: "+12%",
+      trend: "up",
     },
-    { 
-      label: "Jami Tahlillar", 
-      value: stats?.total_analyses || 0, 
-      icon: Activity, 
-      color: "from-emerald-400 to-teal-500",
-      bgGlow: "from-emerald-400/20 to-teal-500/20",
-      change: "+8.3%",
-      trend: "up"
+    {
+      label: "Jami Tahlillar",
+      value: stats?.total_analyses || 0,
+      icon: Activity,
+      color: "from-emerald-500 to-teal-500",
+      change: "+8%",
+      trend: "up",
     },
-    { 
-      label: "Kutilmoqda", 
-      value: stats?.pending_analyses || 0, 
-      icon: Clock, 
-      color: "from-amber-400 to-orange-500",
-      bgGlow: "from-amber-400/20 to-orange-500/20",
-      change: "-3.2%",
-      trend: "down"
+    {
+      label: "Kutilmoqda",
+      value: stats?.pending_analyses || 0,
+      icon: Clock,
+      color: "from-amber-500 to-orange-500",
+      change: "-3%",
+      trend: "down",
     },
-    { 
-      label: "Xatoliklar", 
-      value: stats?.failed_analyses || 0, 
-      icon: AlertCircle, 
-      color: "from-rose-400 to-pink-500",
-      bgGlow: "from-rose-400/20 to-pink-500/20",
-      change: "-15.4%",
-      trend: "down"
+    {
+      label: "Xatoliklar",
+      value: stats?.failed_analyses || 0,
+      icon: AlertCircle,
+      color: "from-rose-500 to-pink-500",
+      change: "-5%",
+      trend: "down",
+    },
+  ];
+
+  const totalAnalyses = stats?.total_analyses ?? 0;
+  const completionRate = totalAnalyses ? Math.round(((stats?.completed_analyses ?? 0) / totalAnalyses) * 100) : 0;
+  const processingRate = totalAnalyses ? Math.round(((stats?.processing_analyses ?? 0) / totalAnalyses) * 100) : 0;
+  const pendingRate = totalAnalyses ? Math.round(((stats?.pending_analyses ?? 0) / totalAnalyses) * 100) : 0;
+  const failureRate = totalAnalyses ? Math.round(((stats?.failed_analyses ?? 0) / totalAnalyses) * 100) : 0;
+  const averageFindings = totalAnalyses ? (stats?.total_findings ?? 0) / totalAnalyses : 0;
+  const analysesPerPatient = stats?.total_patients ? stats.total_analyses / Math.max(stats.total_patients, 1) : 0;
+
+  const workloadDistribution = [
+    {
+      label: "Bajarilgan",
+      count: stats?.completed_analyses ?? 0,
+      percent: completionRate,
+      color: "from-emerald-500 to-teal-500",
+    },
+    {
+      label: "Jarayonda",
+      count: stats?.processing_analyses ?? 0,
+      percent: processingRate,
+      color: "from-cyan-500 to-blue-500",
+    },
+    {
+      label: "Kutilmoqda",
+      count: stats?.pending_analyses ?? 0,
+      percent: pendingRate,
+      color: "from-amber-500 to-orange-500",
+    },
+    {
+      label: "Xatoliklar",
+      count: stats?.failed_analyses ?? 0,
+      percent: failureRate,
+      color: "from-rose-500 to-pink-500",
+    },
+  ];
+
+  const insightBadges = [
+    {
+      label: "Muvaffaqiyat darajasi",
+      value: `${completionRate}%`,
+      description: "Tahlillar muvaffaqiyatli yakunlandi",
+      accent: "from-emerald-500 to-teal-500",
+    },
+    {
+      label: "Oʼrtacha topilmalar",
+      value: `${averageFindings.toFixed(1)}`,
+      description: "Har bir tahlil boʼyicha",
+      accent: "from-indigo-500 to-purple-500",
+    },
+    {
+      label: "Tahlillar/Bemor",
+      value: `${analysesPerPatient.toFixed(1)}`,
+      description: "Ish yuklamasi koʼrsatkichi",
+      accent: "from-cyan-500 to-blue-500",
+    },
+  ];
+
+  const focusAreas = [
+    {
+      title: "Jarayon monitoringi",
+      value: `${processingRate}% jarayonda`,
+      description: "AI modeli real vaqt rejimida ishlamoqda",
+      icon: Clock,
+      container: "border-blue-200/70 dark:border-blue-500/30 bg-blue-50/70 dark:bg-blue-500/10",
+      iconColor: "text-blue-600 dark:text-blue-300",
+    },
+    {
+      title: "Kutilayotgan ishlar",
+      value: `${pendingRate}% navbatda`,
+      description: "Operator tasdiqlashini kutayotgan tahlillar",
+      icon: AlertCircle,
+      container: "border-amber-200/70 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-500/10",
+      iconColor: "text-amber-500 dark:text-amber-300",
+    },
+    {
+      title: "Sifat koʼrsatkichi",
+      value: `${(100 - failureRate).toFixed(1)}% barqarorlik`,
+      description: "Soʼnggi tahlillarda aniqlik darajasi",
+      icon: CheckCircle2,
+      container: "border-emerald-200/70 dark:border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-500/10",
+      iconColor: "text-emerald-500 dark:text-emerald-300",
     },
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-blue-50 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800 overflow-hidden">
-      {/* Animated Background Blobs */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-cyan-300 dark:bg-cyan-500 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-20 dark:opacity-10 animate-blob"></div>
-        <div className="absolute top-1/3 right-1/4 w-96 h-96 bg-blue-300 dark:bg-blue-500 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-20 dark:opacity-10 animate-blob animation-delay-2000"></div>
-        <div className="absolute bottom-0 left-1/2 w-96 h-96 bg-purple-300 dark:bg-purple-500 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-20 dark:opacity-10 animate-blob animation-delay-4000"></div>
+    <div className="relative min-h-screen bg-slate-50 dark:bg-slate-950">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -top-32 left-1/3 h-72 w-72 rounded-full bg-cyan-400/20 blur-3xl dark:bg-cyan-500/10" />
+        <div className="absolute top-1/2 -left-24 h-80 w-80 rounded-full bg-blue-400/20 blur-3xl dark:bg-blue-500/10" />
+        <div className="absolute bottom-0 right-10 h-72 w-72 rounded-full bg-purple-400/20 blur-3xl dark:bg-purple-500/10" />
       </div>
 
-      <div className="relative z-10 p-8">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
+      <div className="relative mx-auto max-w-6xl px-6 py-10 lg:px-8">
+        <motion.header
+          initial={{ opacity: 0, y: -16 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-12"
+          transition={{ duration: 0.4 }}
+          className="grid gap-8 lg:grid-cols-[2fr,1fr] lg:items-start"
         >
-          <div className="flex items-center gap-4 mb-4">
-            <motion.div
-              initial={{ scale: 0, rotate: -180 }}
-              animate={{ scale: 1, rotate: 0 }}
-              transition={{ type: "spring", stiffness: 200, delay: 0.2 }}
-              whileHover={{ scale: 1.1, rotate: 360 }}
-              className="p-4 rounded-2xl bg-gradient-to-br from-cyan-100 to-blue-100 dark:from-cyan-500/20 dark:to-blue-500/20 border-2 border-cyan-200 dark:border-cyan-500/30 backdrop-blur-sm shadow-lg hover:shadow-cyan-300/50 dark:hover:shadow-cyan-500/30 transition-all duration-300"
-            >
-              <Brain className="w-8 h-8 text-cyan-600 dark:text-cyan-400" />
-            </motion.div>
-            <div>
-              <h1 className="text-5xl font-bold bg-gradient-to-r from-cyan-600 via-blue-600 to-purple-600 dark:from-cyan-400 dark:via-blue-400 dark:to-purple-400 bg-clip-text text-transparent">
-                Dashboard
-              </h1>
-              <p className="text-slate-600 dark:text-slate-400 mt-1">AI-powered tibbiy tahlil platformasi</p>
+          <div className="space-y-6">
+            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200/70 bg-white/80 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300">
+              <Brain className="h-3.5 w-3.5" />
+              AI diagnostika boshqaruv paneli
             </div>
+            <div className="space-y-4">
+              <h1 className="text-4xl font-semibold tracking-tight text-slate-900 dark:text-white md:text-5xl">
+                Klinik operatsiyalarni real vaqtda kuzatib boring
+              </h1>
+              <p className="max-w-2xl text-base text-slate-600 dark:text-slate-400">
+                Dashboard tahlillar hajmi, muhim koʼrsatkichlar va xizmatlar holatini bir joyda jamlaydi. AI modeli va klinik jamoa oʼrtasidagi hamkorlikni samarali boshqarish uchun moʼljallangan.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 rounded-full border border-emerald-200/70 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 shadow-sm dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70 opacity-75" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                </span>
+                {statusError ? "Cheklangan holat" : "Tizim faol"}
+              </div>
+              <div className="flex items-center gap-2 rounded-full border border-slate-200/70 bg-white px-4 py-2 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-300">
+                <Zap className="h-4 w-4" />
+                Real-time monitoring yoqilgan
+              </div>
+              {lastChecked && (
+                <div className="rounded-full border border-slate-200/70 bg-white px-4 py-2 text-xs text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-400">
+                  Oxirgi tekshiruv: {lastChecked.toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" })}
+                </div>
+              )}
+            </div>
+            {statusError && (
+              <div className="flex items-center gap-3 rounded-2xl border border-rose-200/70 bg-rose-50/70 p-4 text-sm text-rose-600 shadow-sm dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+                <AlertCircle className="h-5 w-5" />
+                {statusError}
+              </div>
+            )}
           </div>
-          
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.3 }}
-            className="flex items-center gap-3 text-sm"
-          >
-            <motion.div 
-              whileHover={{ scale: 1.05 }}
-              className="flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-emerald-100 to-teal-100 dark:from-emerald-500/10 dark:to-teal-500/10 border-2 border-emerald-300 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-400 shadow-md hover:shadow-lg transition-all duration-300"
-            >
-              <motion.div
-                animate={{ scale: [1, 1.3, 1] }}
-                transition={{ repeat: Infinity, duration: 2 }}
-                className="w-2 h-2 bg-emerald-500 dark:bg-emerald-400 rounded-full"
-              ></motion.div>
-              <span className="font-medium">Tizim faol</span>
-            </motion.div>
-            <motion.div 
-              whileHover={{ scale: 1.05 }}
-              className="px-4 py-2 rounded-full bg-gradient-to-r from-cyan-100 to-blue-100 dark:from-cyan-500/10 dark:to-blue-500/10 border-2 border-cyan-300 dark:border-cyan-500/30 text-cyan-700 dark:text-cyan-400 shadow-md hover:shadow-lg transition-all duration-300"
-            >
-              <span className="flex items-center gap-2">
-                <Zap className="w-4 h-4" />
-                <span className="font-medium">Real-time monitoring</span>
-              </span>
-            </motion.div>
-          </motion.div>
-        </motion.div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <div className="grid gap-4">
+            <div className="rounded-2xl border border-slate-200/70 bg-white/80 p-5 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/70">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Bugungi natija</h2>
+                <ArrowUpRight className="h-4 w-4 text-slate-400" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Bajarilgan tahlillar</p>
+                  <p className="text-3xl font-semibold text-slate-900 dark:text-white">{(stats?.completed_analyses || 0).toLocaleString()}</p>
+                </div>
+                <div className="rounded-xl bg-slate-100/80 p-4 text-sm text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
+                  Muvaffaqiyat darajasi <span className="font-semibold text-slate-900 dark:text-white">{completionRate}%</span>
+                  <div className="mt-2 h-2 rounded-full bg-slate-200 dark:bg-slate-700">
+                    <div className="h-2 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500" style={{ width: `${completionRate}%` }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => checkSystemStatus()}
+              disabled={checkingStatus}
+              className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200/70 bg-slate-900 px-5 py-4 text-sm font-semibold text-white shadow-lg transition disabled:cursor-not-allowed disabled:opacity-80 dark:border-slate-700"
+            >
+              {checkingStatus ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Tekshirilmoqda
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" /> Xizmatlarni tekshirish
+                </>
+              )}
+            </motion.button>
+          </div>
+        </motion.header>
+
+        <section className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
           {statCards.map((stat, index) => (
             <motion.div
               key={stat.label}
-              initial={{ opacity: 0, y: 20, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ delay: 0.1 * index, type: "spring", stiffness: 200 }}
-              whileHover={{ scale: 1.08, y: -10, rotate: 1 }}
-              className="group relative"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 * index, type: "spring", stiffness: 180 }}
+              whileHover={{ y: -6 }}
+              className="relative overflow-hidden rounded-2xl border border-slate-200/70 bg-white/90 p-6 shadow-sm transition dark:border-slate-800 dark:bg-slate-900/70"
             >
-              {/* Glow Effect */}
-              <div className={`absolute inset-0 bg-gradient-to-r ${stat.bgGlow} blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-2xl`}></div>
-              
-              {/* Card Content */}
-              <div className={`relative p-6 rounded-2xl bg-gradient-to-br from-white to-cyan-50/30 dark:from-slate-800 dark:to-slate-700 border-2 border-cyan-200 dark:border-slate-600 group-hover:border-cyan-300 dark:group-hover:border-cyan-500/50 backdrop-blur-sm overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-300`}>
-                {/* Animated Background Pattern */}
-                <div className="absolute inset-0 opacity-5 dark:opacity-10">
-                  <div className="absolute inset-0" style={{
-                    backgroundImage: `radial-gradient(circle at 2px 2px, currentColor 1px, transparent 0)`,
-                    backgroundSize: '24px 24px'
-                  }}></div>
+              <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${stat.color}`} />
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">{stat.label}</p>
+                  <p className="mt-3 text-4xl font-semibold text-slate-900 dark:text-white">{(stat.value || 0).toLocaleString()}</p>
                 </div>
-
-                {/* Icon and Change Badge */}
-                <div className="relative flex items-start justify-between mb-4">
-                  <motion.div 
-                    whileHover={{ rotate: 360, scale: 1.2 }}
-                    transition={{ duration: 0.6 }}
-                    className={`p-3 rounded-xl bg-gradient-to-br ${stat.color} shadow-lg group-hover:shadow-xl transition-all duration-300`}
-                  >
-                    <stat.icon className="w-6 h-6 text-white" />
-                  </motion.div>
-                  <motion.div 
-                    whileHover={{ scale: 1.1 }}
-                    className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold shadow-md ${
-                      stat.trend === 'up' ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border-2 border-emerald-300 dark:border-emerald-500/30' : 'bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 border-2 border-rose-300 dark:border-rose-500/30'
-                    }`}
-                  >
-                    <ArrowUpRight className={`w-3 h-3 ${stat.trend === 'down' ? 'rotate-90' : ''}`} />
-                    {stat.change}
-                  </motion.div>
+                <div className={`rounded-xl bg-gradient-to-br ${stat.color} p-3 text-white shadow-md`}>
+                  <stat.icon className="h-5 w-5" />
                 </div>
-
-                {/* Value */}
-                <motion.div 
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ delay: 0.2 + index * 0.1, type: "spring" }}
-                  className={`text-5xl font-bold mb-2 bg-gradient-to-r ${stat.color} bg-clip-text text-transparent`}
-                >
-                  {(stat.value || 0).toLocaleString()}
-                </motion.div>
-
-                {/* Label */}
-                <div className="text-sm text-slate-700 dark:text-slate-300 font-semibold">{stat.label}</div>
+              </div>
+              <div className="mt-4 flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                <ArrowUpRight className={`h-3 w-3 ${stat.trend === "down" ? "rotate-90" : ""}`} />
+                {stat.change}
               </div>
             </motion.div>
           ))}
-        </div>
+        </section>
 
-        {/* Grid Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Quick Stats - Takes 2 columns */}
+        <section className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-3">
           <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.5 }}
-            whileHover={{ scale: 1.02 }}
-            className="lg:col-span-2 p-6 rounded-2xl bg-white/80 dark:bg-slate-800/80 border-2 border-cyan-200 dark:border-slate-600 backdrop-blur-xl relative overflow-hidden group shadow-xl hover:shadow-2xl transition-all duration-300"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="lg:col-span-2 rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/70"
           >
-            <div className="absolute inset-0 bg-gradient-to-br from-purple-100/30 via-cyan-100/30 to-blue-100/30 dark:from-purple-500/5 dark:via-cyan-500/5 dark:to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-            
-            <div className="relative">
-              <div className="flex items-center gap-3 mb-6">
-                <motion.div 
-                  whileHover={{ rotate: 180, scale: 1.1 }}
-                  transition={{ duration: 0.5 }}
-                  className="p-2 rounded-lg bg-gradient-to-br from-purple-100 to-blue-100 dark:from-purple-500/20 dark:to-blue-500/20 shadow-md"
-                >
-                  <TrendingUp className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                </motion.div>
-                <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Tezkor Ma'lumotlar</h2>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Ish yuklamasi</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">AI pipeline boʼyicha status taqsimoti</p>
               </div>
-              
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                  { label: "Bajarilgan", value: stats?.completed_analyses || 0, color: "from-emerald-400 to-teal-500", icon: Activity },
-                  { label: "Jarayonda", value: stats?.processing_analyses || 0, color: "from-cyan-400 to-blue-500", icon: Clock },
-                  { label: "Topilmalar", value: stats?.total_findings || 0, color: "from-purple-400 to-pink-500", icon: Star },
-                  { label: "Rasmlar", value: stats?.total_images || 0, color: "from-amber-400 to-orange-500", icon: Activity },
-                ].map((item, index) => (
-                  <motion.div
-                    key={item.label}
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: 0.6 + index * 0.1 }}
-                    whileHover={{ scale: 1.1, y: -5 }}
-                    className="relative p-4 rounded-xl bg-gradient-to-br from-cyan-50 to-blue-50 dark:from-slate-700 dark:to-slate-600 border-2 border-cyan-200 dark:border-slate-500/50 group/item overflow-hidden shadow-md hover:shadow-lg transition-all duration-300"
-                  >
-                    <div className={`absolute inset-0 bg-gradient-to-br ${item.color} opacity-0 group-hover/item:opacity-20 transition-opacity duration-300`}></div>
-                    <div className="relative">
-                      <motion.div
-                        whileHover={{ rotate: 360 }}
-                        transition={{ duration: 0.6 }}
-                      >
-                        <item.icon className="w-5 h-5 text-slate-600 dark:text-slate-400 mb-2" />
-                      </motion.div>
-                      <p className={`text-3xl font-bold bg-gradient-to-r ${item.color} bg-clip-text text-transparent mb-1`}>
-                        {(item.value || 0).toLocaleString()}
-                      </p>
-                      <p className="text-xs text-slate-700 dark:text-slate-300 font-medium">{item.label}</p>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
+              <TrendingUp className="h-5 w-5 text-slate-400" />
+            </div>
+            <div className="mt-6 grid gap-5 sm:grid-cols-2">
+              {workloadDistribution.map((item) => (
+                <div key={item.label} className="space-y-2">
+                  <div className="flex items-center justify-between text-sm font-medium text-slate-600 dark:text-slate-300">
+                    <span>{item.label}</span>
+                    <span>{item.percent}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-800">
+                    <div
+                      className={`h-2 rounded-full bg-gradient-to-r ${item.color}`}
+                      style={{ width: `${Math.min(item.percent, 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{item.count.toLocaleString()} ta tahlil</p>
+                </div>
+              ))}
             </div>
           </motion.div>
 
-          {/* System Status - Takes 1 column */}
           <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.6 }}
-            whileHover={{ scale: 1.02 }}
-            className="p-6 rounded-2xl bg-white/80 dark:bg-slate-800/80 border-2 border-emerald-200 dark:border-slate-600 backdrop-blur-xl relative overflow-hidden group shadow-xl hover:shadow-2xl transition-all duration-300"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/70"
           >
-            <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/30 to-teal-100/30 dark:from-emerald-500/5 dark:to-teal-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-            
-            <div className="relative">
-              <div className="flex items-center gap-3 mb-6">
-                <motion.div 
-                  animate={{ rotate: [0, 10, -10, 0] }}
-                  transition={{ repeat: Infinity, duration: 3 }}
-                  className="p-2 rounded-lg bg-gradient-to-br from-emerald-100 to-teal-100 dark:from-emerald-500/20 dark:to-teal-500/20 shadow-md"
-                >
-                  <Zap className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                </motion.div>
-                <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Tizim Holati</h2>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Xizmatlar holati</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Backend infratuzilma monitoringi</p>
               </div>
-              
-              <div className="space-y-4">
-                {[
-                  { label: "API Server", status: "Faol", color: "emerald" },
-                  { label: "Ma'lumotlar bazasi", status: "Faol", color: "emerald" },
-                  { label: "AI Model", status: "Tayyor", color: "emerald" },
-                  { label: "File Storage", status: "Faol", color: "emerald" },
-                ].map((item, index) => (
-                  <motion.div
-                    key={item.label}
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.7 + index * 0.1 }}
-                    whileHover={{ scale: 1.05, x: 5 }}
-                    className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-slate-700 dark:to-slate-600 border-2 border-emerald-200 dark:border-slate-500/50 group/status hover:border-emerald-300 dark:hover:border-emerald-500/50 transition-all duration-300 shadow-md"
+              <Activity className="h-5 w-5 text-slate-400" />
+            </div>
+            <div className="mt-6 space-y-3">
+              {serviceStates.map((service) => {
+                const styles = STATUS_STYLES[service.status];
+                return (
+                  <div
+                    key={service.id}
+                    className="flex items-center justify-between rounded-2xl border border-slate-200/70 bg-white/70 p-4 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-900/60"
                   >
-                    <span className="text-slate-800 dark:text-slate-200 font-semibold">{item.label}</span>
-                    <div className="flex items-center gap-2">
-                      <motion.div
-                        animate={{ scale: [1, 1.3, 1] }}
-                        transition={{ repeat: Infinity, duration: 2, delay: index * 0.2 }}
-                        className="w-2 h-2 bg-emerald-500 dark:bg-emerald-400 rounded-full shadow-lg shadow-emerald-500/50"
-                      ></motion.div>
-                      <span className="px-3 py-1 bg-gradient-to-r from-emerald-100 to-teal-100 dark:from-emerald-500/20 dark:to-teal-500/20 text-emerald-700 dark:text-emerald-400 rounded-full text-sm font-bold border-2 border-emerald-300 dark:border-emerald-500/30">
-                        {item.status}
-                      </span>
+                    <div>
+                      <div className="flex items-center gap-2 font-medium text-slate-700 dark:text-slate-200">
+                        <span className={`inline-flex h-2.5 w-2.5 rounded-full ${styles.dot}`} />
+                        {service.label}
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{service.description}</p>
                     </div>
-                  </motion.div>
-                ))}
-              </div>
+                    <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${styles.badge}`}>
+                      {styles.label}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </motion.div>
-        </div>
+        </section>
+
+        <section className="mt-10 grid grid-cols-1 gap-6 xl:grid-cols-3">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/70"
+          >
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 p-2.5 text-white shadow-md">
+                <Star className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Strategik koʼrsatkichlar</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Klinik samaradorlik uchun kuzatuv</p>
+              </div>
+            </div>
+            <div className="mt-6 space-y-4">
+              {insightBadges.map((insight) => (
+                <div
+                  key={insight.label}
+                  className="rounded-2xl border border-slate-200/60 bg-slate-100/80 p-4 text-sm shadow-sm dark:border-slate-800/60 dark:bg-slate-800/70"
+                >
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{insight.label}</p>
+                  <p className={`mt-2 text-3xl font-semibold bg-gradient-to-r ${insight.accent} bg-clip-text text-transparent`}>{insight.value}</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{insight.description}</p>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+            className="rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/70"
+          >
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 p-2.5 text-white shadow-md">
+                <Users className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Tezkor koʼrsatkichlar</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Joriy faoliyatni umumlashtirish</p>
+              </div>
+            </div>
+            <div className="mt-6 space-y-4 text-sm">
+              {[
+                { label: "Oʼrtacha tahlillar / bemor", value: analysesPerPatient.toFixed(1) },
+                { label: "Oʼrtacha topilmalar / tahlil", value: averageFindings.toFixed(1) },
+                { label: "Kutilayotgan jarayonlar", value: `${pendingRate}%` },
+                { label: "Jarayon holati", value: `${processingRate}% jarayonda` },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center justify-between rounded-2xl border border-slate-200/60 bg-white/70 p-4 shadow-sm dark:border-slate-800/60 dark:bg-slate-900/60"
+                >
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{item.label}</p>
+                  <p className="text-lg font-semibold text-slate-900 dark:text-white">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/70"
+          >
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 p-2.5 text-white shadow-md">
+                <CheckCircle2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Diqqat markazlari</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Operatsion ustuvorliklar</p>
+              </div>
+            </div>
+            <div className="mt-6 space-y-4 text-sm">
+              {focusAreas.map((area) => (
+                <div key={area.title} className={`rounded-2xl border p-4 shadow-sm ${area.container}`}>
+                  <div className="flex items-center gap-3">
+                    <div className={`rounded-lg bg-white/70 p-2 text-sm ${area.iconColor} dark:bg-slate-900/40`}>
+                      <area.icon className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800 dark:text-white">{area.title}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{area.description}</p>
+                    </div>
+                  </div>
+                  <p className="mt-4 text-lg font-semibold text-slate-900 dark:text-white">{area.value}</p>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        </section>
       </div>
-
-      <style jsx global>{`
-        @keyframes blob {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(30px, -50px) scale(1.1); }
-          66% { transform: translate(-20px, 20px) scale(0.9); }
-        }
-        .animate-blob {
-          animation: blob 7s infinite;
-        }
-        .animation-delay-2000 {
-          animation-delay: 2s;
-        }
-        .animation-delay-4000 {
-          animation-delay: 4s;
-        }
-      `}</style>
     </div>
   );
 }

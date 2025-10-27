@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Users,
@@ -16,7 +15,9 @@ import {
   CheckCircle2,
   RefreshCw,
 } from "lucide-react";
-import { statisticsAPI, systemAPI } from "@/lib/api";
+import { useStatisticsOverview } from "@/hooks/useStatistics";
+import { useSystemStatus } from "@/hooks/useSystemStatus";
+import type { StatisticsResponse } from "@/types/statistics";
 
 type ServiceStatus = "online" | "offline" | "degraded";
 
@@ -52,62 +53,41 @@ const STATUS_STYLES: Record<ServiceStatus, { badge: string; dot: string; label: 
   },
 };
 
-type Statistics = {
-  total_patients: number;
-  total_analyses: number;
-  completed_analyses: number;
-  pending_analyses: number;
-  processing_analyses: number;
-  failed_analyses: number;
-  total_findings: number;
-  total_images: number;
-};
+type Statistics = StatisticsResponse;
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<Statistics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [serviceStates, setServiceStates] = useState<ServiceState[]>(() =>
-    SERVICE_ITEMS.map((item) => ({ ...item, status: "online" }))
-  );
-  const [checkingStatus, setCheckingStatus] = useState(false);
-  const [lastChecked, setLastChecked] = useState<Date | null>(null);
-  const [statusError, setStatusError] = useState<string | null>(null);
+  const { data: stats, isLoading: statsLoading } = useStatisticsOverview();
+  const systemStatus = useSystemStatus();
 
-  useEffect(() => {
-    loadStatistics();
-    void checkSystemStatus();
-    const interval = setInterval(() => {
-      void checkSystemStatus();
-    }, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  const serviceHealth: ServiceStatus = systemStatus.isError
+    ? "offline"
+    : systemStatus.data?.health.status === "ok"
+    ? "online"
+    : "degraded";
 
-  const loadStatistics = async () => {
-    try {
-      const data = await statisticsAPI.get();
-      setStats(data);
-    } catch (error) {
-      console.error("Failed to load statistics:", error);
-    } finally {
-      setLoading(false);
-    }
+  const serviceStates = SERVICE_ITEMS.map((item) => ({
+    ...item,
+    status: serviceHealth,
+  }));
+
+  const lastChecked = systemStatus.data?.checkedAt
+    ? new Date(systemStatus.data.checkedAt)
+    : systemStatus.dataUpdatedAt
+    ? new Date(systemStatus.dataUpdatedAt)
+    : null;
+
+  const statusError = systemStatus.isError
+    ? "Backend bilan aloqa mavjud emas."
+    : serviceHealth === "degraded"
+    ? "Xizmat holati cheklangan."
+    : null;
+
+  const checkingStatus = systemStatus.isFetching;
+  const loading = statsLoading;
+
+  const checkSystemStatus = () => {
+    void systemStatus.refetch();
   };
-
-  async function checkSystemStatus() {
-    try {
-      setCheckingStatus(true);
-      await systemAPI.health();
-      setServiceStates(SERVICE_ITEMS.map((item) => ({ ...item, status: "online" })));
-      setStatusError(null);
-    } catch (error) {
-      console.error("Failed to check system status:", error);
-      setServiceStates(SERVICE_ITEMS.map((item) => ({ ...item, status: "offline" })));
-      setStatusError("Backend bilan aloqa mavjud emas.");
-    } finally {
-      setLastChecked(new Date());
-      setCheckingStatus(false);
-    }
-  }
 
   if (loading) {
     return (

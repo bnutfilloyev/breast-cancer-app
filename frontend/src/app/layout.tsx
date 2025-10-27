@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, Users, FileImage, Upload, Activity, Sun, Moon, Monitor } from "lucide-react";
 import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
+import { QueryProvider } from "@/providers/query-client";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -121,9 +122,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <ThemeProvider>
-          <LayoutContent>{children}</LayoutContent>
-        </ThemeProvider>
+        <QueryProvider>
+          <ThemeProvider>
+            <LayoutContent>{children}</LayoutContent>
+          </ThemeProvider>
+        </QueryProvider>
       </body>
     </html>
   );

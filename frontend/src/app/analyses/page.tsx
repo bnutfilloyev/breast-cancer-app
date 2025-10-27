@@ -1,58 +1,65 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { FileImage, Search, Calendar, User, TrendingUp, Filter, Eye, Trash2 } from "lucide-react";
-import { analysisAPI } from "@/lib/api";
+import { FileImage, Search, Calendar, User, TrendingUp, Filter, Eye, Trash2, Loader2 } from "lucide-react";
 
-type Analysis = {
-  id: number;
-  patient_id: number | null;
-  status: string;
-  total_findings: number;
-  dominant_label: string | null;
-  dominant_category: string | null;
-  created_at: string;
-  updated_at: string;
-};
+import { useAnalysesList, useDeleteAnalysis } from "@/hooks/useAnalyses";
+import type { AnalysisStatus, AnalysisSummary } from "@/types/analysis";
+
+type Analysis = AnalysisSummary;
 
 export default function AnalysesPage() {
-  const [analyses, setAnalyses] = useState<Analysis[]>([]);
-  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<AnalysisStatus | "all">("all");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const { data, isLoading, isFetching } = useAnalysesList({
+    status: statusFilter === "all" ? undefined : statusFilter,
+    limit: 100,
+  });
+  const deleteAnalysis = useDeleteAnalysis();
 
-  useEffect(() => {
-    loadAnalyses();
-  }, []);
+  const analyses = useMemo<Analysis[]>(() => data?.items ?? [], [data]);
+  const showLoadingState = isLoading && analyses.length === 0;
 
-  const loadAnalyses = async () => {
+  const filteredAnalyses = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return analyses.filter((analysis) => {
+      const matchesSearch = term
+        ? analysis.dominant_label?.toLowerCase().includes(term) ||
+          analysis.id.toString().includes(term)
+        : true;
+      const matchesStatus = statusFilter === "all" || analysis.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [analyses, searchTerm, statusFilter]);
+
+  const handleDelete = async (id: number) => {
+    if (!confirm("Ushbu tahlilni o‘chirmoqchimisiz?")) return;
     try {
-      setLoading(true);
-      const response = await analysisAPI.list();
-      setAnalyses(response.items || []);
+      setDeletingId(id);
+      await deleteAnalysis.mutateAsync(id);
     } catch (error) {
-      console.error("Failed to load analyses:", error);
+      console.error("Failed to delete analysis", error);
     } finally {
-      setLoading(false);
+      setDeletingId(null);
     }
   };
 
-  const filteredAnalyses = analyses.filter((analysis) => {
-    const matchesSearch = 
-      analysis.dominant_label?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      analysis.id.toString().includes(searchTerm);
-    const matchesStatus = statusFilter === "all" || analysis.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const statusLabels: Record<AnalysisStatus, string> = {
+    completed: "Bajarilgan",
+    pending: "Kutilmoqda",
+    processing: "Jarayonda",
+    failed: "Xatolik",
+  };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: AnalysisStatus) => {
     switch (status) {
-      case "COMPLETED":
+      case "completed":
         return "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/30";
-      case "PENDING":
+      case "pending":
         return "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-500/30";
-      case "PROCESSING":
+      case "processing":
         return "bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-500/30";
       default:
         return "bg-slate-100 dark:bg-gray-500/20 text-slate-600 dark:text-gray-300 border-slate-300 dark:border-gray-500/30";
@@ -127,13 +134,13 @@ export default function AnalysesPage() {
             <Filter className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 dark:text-neutral-500 group-focus-within:text-blue-600 dark:group-focus-within:text-blue-400 transition-colors" />
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => setStatusFilter(e.target.value as AnalysisStatus | "all")}
               className="pl-12 pr-8 py-3 bg-white/80 dark:bg-neutral-900/50 border-2 border-slate-200 dark:border-neutral-800 rounded-xl focus:border-blue-400 dark:focus:border-blue-500/50 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500/20 outline-none transition-all backdrop-blur-sm appearance-none cursor-pointer text-slate-900 dark:text-white shadow-lg"
             >
               <option value="all">Barcha statuslar</option>
-              <option value="COMPLETED">Bajarilgan</option>
-              <option value="PENDING">Kutilmoqda</option>
-              <option value="PROCESSING">Jarayonda</option>
+              <option value="completed">Bajarilgan</option>
+              <option value="pending">Kutilmoqda</option>
+              <option value="processing">Jarayonda</option>
             </select>
           </div>
         </motion.div>
@@ -143,13 +150,14 @@ export default function AnalysesPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8"
+          className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8"
         >
-          {[
+          {[ 
             { label: "Jami", value: analyses.length, color: "from-purple-500 to-blue-500", icon: FileImage },
-            { label: "Bajarilgan", value: analyses.filter(a => a.status === "COMPLETED").length, color: "from-emerald-500 to-teal-500", icon: Eye },
-            { label: "Kutilmoqda", value: analyses.filter(a => a.status === "PENDING").length, color: "from-amber-500 to-orange-500", icon: Calendar },
-            { label: "O'rtacha topilmalar", value: Math.round(analyses.reduce((acc, a) => acc + a.total_findings, 0) / analyses.length) || 0, color: "from-pink-500 to-rose-500", icon: TrendingUp },
+            { label: "Bajarilgan", value: analyses.filter((a) => a.status === "completed").length, color: "from-emerald-500 to-teal-500", icon: Eye },
+            { label: "Kutilmoqda", value: analyses.filter((a) => a.status === "pending").length, color: "from-amber-500 to-orange-500", icon: Calendar },
+            { label: "Jarayonda", value: analyses.filter((a) => a.status === "processing").length, color: "from-blue-500 to-indigo-500", icon: Loader2 },
+            { label: "O'rtacha topilmalar", value: analyses.length ? Math.round(analyses.reduce((acc, a) => acc + a.total_findings, 0) / analyses.length) : 0, color: "from-pink-500 to-rose-500", icon: TrendingUp },
           ].map((stat, index) => (
             <motion.div
               key={stat.label}
@@ -180,7 +188,7 @@ export default function AnalysesPage() {
         </motion.div>
 
         {/* Analyses List */}
-        {loading ? (
+        {showLoadingState ? (
           <div className="grid grid-cols-1 gap-4">
             {[1, 2, 3].map((i) => (
               <div key={i} className="h-32 bg-white/60 dark:bg-neutral-900/50 rounded-2xl animate-pulse border-2 border-slate-200 dark:border-neutral-800"></div>
@@ -202,7 +210,9 @@ export default function AnalysesPage() {
           </motion.div>
         ) : (
           <div className="grid grid-cols-1 gap-4">
-            {filteredAnalyses.map((analysis, index) => (
+            {filteredAnalyses.map((analysis, index) => {
+              const isDeleting = deleteAnalysis.isPending && deletingId === analysis.id;
+              return (
               <motion.div
                 key={analysis.id}
                 initial={{ opacity: 0, x: -20 }}
@@ -226,7 +236,7 @@ export default function AnalysesPage() {
                         <div className="flex items-center gap-3 mb-1">
                           <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Tahlil #{analysis.id}</h3>
                           <span className={`px-3 py-1 rounded-full text-xs font-bold border-2 ${getStatusColor(analysis.status)}`}>
-                            {analysis.status}
+                            {statusLabels[analysis.status] ?? analysis.status}
                           </span>
                         </div>
                         <div className="flex items-center gap-4 text-sm text-slate-600 dark:text-neutral-400">
@@ -262,30 +272,73 @@ export default function AnalysesPage() {
                         >
                           <Eye className="w-5 h-5" />
                         </motion.button>
-                        <motion.button 
+                        <motion.button
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            if (confirm(`Tahlil #${analysis.id} ni o'chirmoqchimisiz?`)) {
-                              try {
-                                await analysisAPI.delete(analysis.id);
-                                loadAnalyses();
-                              } catch (error) {
-                                alert("O'chirishda xatolik yuz berdi");
-                              }
-                            }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleDelete(analysis.id);
                           }}
-                          className="p-2 rounded-lg bg-rose-100 dark:bg-rose-500/20 border-2 border-rose-200 dark:border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-500/30 transition-all shadow-md"
+                          disabled={isDeleting}
+                          className="p-2 rounded-lg bg-rose-100 dark:bg-rose-500/20 border-2 border-rose-200 dark:border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-500/30 transition-all shadow-md disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          <Trash2 className="w-5 h-5" />
+                          {isDeleting ? (
+                            <Loader2 className="w-5 h-5 animate-spin" aria-hidden />
+                          ) : (
+                            <Trash2 className="w-5 h-5" />
+                          )}
                         </motion.button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-3">
+                    <div className="rounded-xl border border-slate-200 dark:border-neutral-800 bg-white/90 dark:bg-neutral-900/50 p-4">
+                      <div className="text-xs uppercase text-slate-400 dark:text-neutral-500 font-medium">Status</div>
+                      <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-neutral-200">
+                        <div
+                          className={`h-2 w-2 rounded-full ${
+                            analysis.status === "completed"
+                              ? "bg-emerald-500"
+                              : analysis.status === "failed"
+                              ? "bg-rose-500"
+                              : "bg-amber-500"
+                          }`}
+                        ></div>
+                        {statusLabels[analysis.status] ?? analysis.status}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">
+                        {analysis.dominant_category ? `Kategoriya: ${analysis.dominant_category}` : "Kategoriya aniqlanmagan"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 dark:border-neutral-800 bg-white/90 dark:bg-neutral-900/50 p-4">
+                      <div className="text-xs uppercase text-slate-400 dark:text-neutral-500 font-medium">Topilmalar soni</div>
+                      <div className="mt-2 text-2xl font-bold text-slate-800 dark:text-white">{analysis.total_findings}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">
+                        Asosiy natija: {analysis.dominant_label || "Aniqlanmagan"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 dark:border-neutral-800 bg-white/90 dark:bg-neutral-900/50 p-4">
+                      <div className="text-xs uppercase text-slate-400 dark:text-neutral-500 font-medium">Yaratilgan sana</div>
+                      <div className="mt-2 text-sm font-semibold text-slate-700 dark:text-neutral-200">
+                        {new Date(analysis.created_at).toLocaleString("uz-UZ", {
+                          day: "2-digit",
+                          month: "long",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">
+                        Yangilangan sana: {new Date(analysis.completed_at ?? analysis.created_at).toLocaleString("uz-UZ")}
                       </div>
                     </div>
                   </div>
                 </div>
               </motion.div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

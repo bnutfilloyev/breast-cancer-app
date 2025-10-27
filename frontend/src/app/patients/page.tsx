@@ -3,21 +3,16 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { Calendar, Edit3, Eye, Mail, MapPin, Phone, Plus, Search, Trash2, Users } from "lucide-react";
+import { Calendar, Edit3, Eye, Loader2, Mail, MapPin, Phone, Plus, Search, Trash2, Users } from "lucide-react";
 
-import { patientAPI } from "@/lib/api";
+import { useDeletePatient, usePatientsList } from "@/hooks/usePatients";
+import type { PatientListItem } from "@/types/patient";
 
-type Patient = {
-  id: number;
-  full_name: string;
-  medical_record_number?: string | null;
-  date_of_birth?: string | null;
-  gender?: string | null;
+type Patient = PatientListItem & {
   phone?: string | null;
   email?: string | null;
   address?: string | null;
-  created_at: string;
-  updated_at: string;
+  updated_at?: string | null;
 };
 
 const cardVariants = {
@@ -32,44 +27,34 @@ const cardVariants = {
 
 export default function PatientsPage() {
   const router = useRouter();
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [totalPatients, setTotalPatients] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const pageSize = 20;
+  const { data, isLoading, isFetching } = usePatientsList({
+    skip: (page - 1) * pageSize,
+    limit: pageSize,
+    search: search || undefined,
+  });
+  const deletePatient = useDeletePatient();
+
+  const patients: Patient[] = data?.items ?? [];
+  const totalPatients = data?.total ?? patients.length;
+  const totalPages = data?.total_pages ?? 1;
+  const showLoadingState = isLoading && patients.length === 0;
 
   useEffect(() => {
-    const fetchPatients = async () => {
-      try {
-        setLoading(true);
-        const data = await patientAPI.list({
-          skip: (page - 1) * 20,
-          limit: 20,
-          search: search || undefined,
-        });
-        setPatients(data.items || []);
-        setTotalPages(data.total_pages || 1);
-        setTotalPatients(data.total ?? data.items?.length ?? 0);
-      } catch (error) {
-        console.error("Failed to fetch patients", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void fetchPatients();
-  }, [page, search]);
+    if (page > totalPages && totalPages > 0) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const handleDelete = async (id: number) => {
     if (!confirm("Haqiqatan ham ushbu bemorni o’chirmoqchimisiz?")) return;
 
     try {
       setDeletingId(id);
-      await patientAPI.delete(id);
-      setPatients((prev) => prev.filter((patient) => patient.id !== id));
-      setTotalPatients((prev) => Math.max(prev - 1, 0));
+      await deletePatient.mutateAsync(id);
     } catch (error) {
       console.error("Failed to delete patient", error);
     } finally {
@@ -100,7 +85,12 @@ export default function PatientsPage() {
           >
             <div className="inline-flex items-center gap-3 rounded-2xl border border-cyan-200 bg-white/80 px-4 py-2 shadow-sm backdrop-blur dark:border-cyan-500/30 dark:bg-slate-900/60">
               <Users className="w-5 h-5 text-cyan-600 dark:text-cyan-300" />
-              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Jami bemorlar: {totalPatients}</span>
+              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                Jami bemorlar: {totalPatients}
+              </span>
+              {isFetching && (
+                <Loader2 className="h-4 w-4 animate-spin text-cyan-500" aria-hidden />
+              )}
             </div>
             <h1 className="text-3xl font-semibold text-slate-900 dark:text-white">Bemorlar boshqaruvi</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -139,7 +129,7 @@ export default function PatientsPage() {
           />
         </motion.div>
 
-        {loading ? (
+        {showLoadingState ? (
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 6 }).map((_, index) => (
               <div

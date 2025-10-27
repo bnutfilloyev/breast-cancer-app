@@ -124,6 +124,17 @@ export default function DashboardPage() {
     );
   }
 
+  const totalAnalyses = stats?.total_analyses ?? 0;
+  const completionRate = totalAnalyses ? Math.round(((stats?.completed_analyses ?? 0) / totalAnalyses) * 100) : 0;
+  const failureRate = totalAnalyses ? Math.round(((stats?.failed_analyses ?? 0) / totalAnalyses) * 100) : 0;
+  const averageFindings = totalAnalyses ? (stats?.total_findings ?? 0) / totalAnalyses : 0;
+  const analysesPerPatient = stats?.total_patients ? stats.total_analyses / Math.max(stats.total_patients, 1) : 0;
+  const queueCount = Math.max(
+    totalAnalyses - ((stats?.completed_analyses ?? 0) + (stats?.failed_analyses ?? 0)),
+    0
+  );
+  const queueRate = totalAnalyses ? Math.round((queueCount / totalAnalyses) * 100) : 0;
+
   const statCards = [
     {
       label: "Jami Bemorlar",
@@ -142,30 +153,22 @@ export default function DashboardPage() {
       trend: "up",
     },
     {
-      label: "Kutilmoqda",
-      value: stats?.pending_analyses || 0,
-      icon: Clock,
-      color: "from-amber-500 to-orange-500",
-      change: "-3%",
-      trend: "down",
+      label: "Bajarilgan tahlillar",
+      value: stats?.completed_analyses || 0,
+      icon: CheckCircle2,
+      color: "from-indigo-500 to-sky-500",
+      change: `${completionRate}% muvaffaqiyat`,
+      trend: "up",
     },
     {
-      label: "Xatoliklar",
+      label: "Muammoli tahlillar",
       value: stats?.failed_analyses || 0,
       icon: AlertCircle,
       color: "from-rose-500 to-pink-500",
-      change: "-5%",
-      trend: "down",
+      change: `${failureRate}% nazoratda`,
+      trend: failureRate > 5 ? "up" : "down",
     },
   ];
-
-  const totalAnalyses = stats?.total_analyses ?? 0;
-  const completionRate = totalAnalyses ? Math.round(((stats?.completed_analyses ?? 0) / totalAnalyses) * 100) : 0;
-  const processingRate = totalAnalyses ? Math.round(((stats?.processing_analyses ?? 0) / totalAnalyses) * 100) : 0;
-  const pendingRate = totalAnalyses ? Math.round(((stats?.pending_analyses ?? 0) / totalAnalyses) * 100) : 0;
-  const failureRate = totalAnalyses ? Math.round(((stats?.failed_analyses ?? 0) / totalAnalyses) * 100) : 0;
-  const averageFindings = totalAnalyses ? (stats?.total_findings ?? 0) / totalAnalyses : 0;
-  const analysesPerPatient = stats?.total_patients ? stats.total_analyses / Math.max(stats.total_patients, 1) : 0;
 
   const workloadDistribution = [
     {
@@ -175,16 +178,10 @@ export default function DashboardPage() {
       color: "from-emerald-500 to-teal-500",
     },
     {
-      label: "Jarayonda",
-      count: stats?.processing_analyses ?? 0,
-      percent: processingRate,
-      color: "from-cyan-500 to-blue-500",
-    },
-    {
-      label: "Kutilmoqda",
-      count: stats?.pending_analyses ?? 0,
-      percent: pendingRate,
-      color: "from-amber-500 to-orange-500",
+      label: "Monitoring navbati",
+      count: queueCount,
+      percent: queueRate,
+      color: "from-indigo-500 to-blue-500",
     },
     {
       label: "Xatoliklar",
@@ -217,28 +214,28 @@ export default function DashboardPage() {
 
   const focusAreas = [
     {
-      title: "Jarayon monitoringi",
-      value: `${processingRate}% jarayonda`,
-      description: "AI modeli real vaqt rejimida ishlamoqda",
-      icon: Clock,
-      container: "border-blue-200/70 dark:border-blue-500/30 bg-blue-50/70 dark:bg-blue-500/10",
-      iconColor: "text-blue-600 dark:text-blue-300",
-    },
-    {
-      title: "Kutilayotgan ishlar",
-      value: `${pendingRate}% navbatda`,
-      description: "Operator tasdiqlashini kutayotgan tahlillar",
-      icon: AlertCircle,
-      container: "border-amber-200/70 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-500/10",
-      iconColor: "text-amber-500 dark:text-amber-300",
-    },
-    {
-      title: "Sifat koʼrsatkichi",
-      value: `${(100 - failureRate).toFixed(1)}% barqarorlik`,
-      description: "Soʼnggi tahlillarda aniqlik darajasi",
+      title: "Muvaffaqiyat barqarorligi",
+      value: `${completionRate}% yakunlangan`,
+      description: "AI pipeline real vaqt rejimida ishlamoqda",
       icon: CheckCircle2,
       container: "border-emerald-200/70 dark:border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-500/10",
       iconColor: "text-emerald-500 dark:text-emerald-300",
+    },
+    {
+      title: "Monitoring navbati",
+      value: `${queueCount.toLocaleString()} ta tahlil`,
+      description: "Yangi natijalar avtomatik monitoringda",
+      icon: RefreshCw,
+      container: "border-indigo-200/70 dark:border-indigo-500/30 bg-indigo-50/70 dark:bg-indigo-500/10",
+      iconColor: "text-indigo-500 dark:text-indigo-300",
+    },
+    {
+      title: "Xavfli natijalar",
+      value: `${stats?.failed_analyses ?? 0} ta`,
+      description: "Qoʼshimcha tekshiruv talab qilinadi",
+      icon: AlertCircle,
+      container: "border-rose-200/70 dark:border-rose-500/30 bg-rose-50/70 dark:bg-rose-500/10",
+      iconColor: "text-rose-500 dark:text-rose-300",
     },
   ];
 
@@ -483,8 +480,8 @@ export default function DashboardPage() {
               {[
                 { label: "Oʼrtacha tahlillar / bemor", value: analysesPerPatient.toFixed(1) },
                 { label: "Oʼrtacha topilmalar / tahlil", value: averageFindings.toFixed(1) },
-                { label: "Kutilayotgan jarayonlar", value: `${pendingRate}%` },
-                { label: "Jarayon holati", value: `${processingRate}% jarayonda` },
+                { label: "Monitoring navbati", value: `${queueRate}%` },
+                { label: "Barqarorlik koʼrsatkichi", value: `${(100 - failureRate).toFixed(1)}%` },
               ].map((item) => (
                 <div
                   key={item.label}

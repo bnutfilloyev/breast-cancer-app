@@ -14,6 +14,8 @@ type ThemeContextType = {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
+type ThemeState = { theme: Theme; source: ThemeSource };
+
 const resolveSystemTheme = (): Theme => {
   if (typeof window === "undefined") {
     return "light";
@@ -22,25 +24,29 @@ const resolveSystemTheme = (): Theme => {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 };
 
-const getInitialTheme = (): { theme: Theme; source: ThemeSource } => {
-  if (typeof window === "undefined") {
-    return { theme: "light", source: "system" };
-  }
+const defaultThemeState: ThemeState = { theme: "light", source: "system" };
 
+const readStoredTheme = (): ThemeState => {
   const storedSource = window.localStorage.getItem("theme-source") as ThemeSource | null;
   const storedTheme = window.localStorage.getItem("theme") as Theme | null;
+  const systemTheme = resolveSystemTheme();
 
   if (storedSource === "user" && (storedTheme === "light" || storedTheme === "dark")) {
     return { theme: storedTheme, source: "user" };
   }
 
-  const systemTheme = resolveSystemTheme();
+  if (storedSource === "system") {
+    return { theme: systemTheme, source: "system" };
+  }
+
   if (storedTheme === "light" || storedTheme === "dark") {
-    return { theme: storedTheme, source: storedSource === "system" ? "system" : "user" };
+    return { theme: storedTheme, source: "user" };
   }
 
   return { theme: systemTheme, source: "system" };
 };
+
+const getInitialTheme = (): ThemeState => defaultThemeState;
 
 const applyThemeClass = (theme: Theme) => {
   if (typeof window === "undefined") {
@@ -54,7 +60,21 @@ const applyThemeClass = (theme: Theme) => {
 };
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<{ theme: Theme; source: ThemeSource }>(() => getInitialTheme());
+  const [state, setState] = useState<ThemeState>(() => getInitialTheme());
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const nextState = readStoredTheme();
+    setState((prev) => {
+      if (prev.theme === nextState.theme && prev.source === nextState.source) {
+        return prev;
+      }
+      return nextState;
+    });
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {

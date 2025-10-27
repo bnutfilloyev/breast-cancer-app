@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -16,11 +16,15 @@ import {
   Mail,
   MapPin,
   Phone,
+  RefreshCw,
+  Stethoscope,
+  TrendingUp,
+  UploadCloud,
   Trash2,
   User,
 } from "lucide-react";
 
-import { analysisAPI, patientAPI } from "@/lib/api";
+import { API_BASE_URL, analysisAPI, patientAPI } from "@/lib/api";
 
 type Patient = {
   id: number;
@@ -54,6 +58,24 @@ type Feedback = {
   message: string;
 };
 
+type AnalysisImage = {
+  id: number;
+  relative_path: string | null;
+  thumbnail_path: string | null;
+  original_filename: string;
+  detections_count: number;
+};
+
+type AnalysisPreviewData = {
+  imageUrl: string | null;
+  detections: number;
+  label: string | null;
+  category: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  status: string;
+};
+
 const cardVariants = {
   hidden: { opacity: 0, y: 24 },
   visible: (index = 0) => ({
@@ -74,13 +96,13 @@ const statusMeta = (status: string) => {
       };
     case "PROCESSING":
       return {
-        label: "Jarayonda",
+        label: "Monitoringda",
         badge: "bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30",
         icon: <Activity className="w-4 h-4" />,
       };
     case "PENDING":
       return {
-        label: "Kutilmoqda",
+        label: "Navbatda",
         badge: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30",
         icon: <Clock className="w-4 h-4" />,
       };
@@ -106,6 +128,13 @@ const formatDate = (value?: string | null) => {
   return date.toLocaleDateString("uz-UZ");
 };
 
+const formatDateTime = (value?: string | null) => {
+  if (!value) return "Mavjud emas";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("uz-UZ");
+};
+
 const calculateAge = (value?: string | null) => {
   if (!value) return null;
   const birth = new Date(value);
@@ -119,6 +148,42 @@ const calculateAge = (value?: string | null) => {
   return age;
 };
 
+const buildFileUrl = (path?: string | null) => {
+  if (!path) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+
+  const normalised = path.replace(/\\/g, "/").replace(/^\/+/, "");
+  const withoutUploads = normalised.startsWith("uploads/")
+    ? normalised.slice("uploads/".length)
+    : normalised;
+
+  const encoded = withoutUploads
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+  if (!encoded) {
+    return null;
+  }
+
+  if (withoutUploads.startsWith("files/")) {
+    return `${API_BASE_URL}/${encoded}`;
+  }
+
+  return `${API_BASE_URL}/files/${encoded}`;
+};
+
+const resolveImageUrl = (image?: Pick<AnalysisImage, "thumbnail_path" | "relative_path"> | null) => {
+  if (!image) return null;
+  return buildFileUrl(image.thumbnail_path) ?? buildFileUrl(image.relative_path);
+};
+
 export default function PatientDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -126,6 +191,10 @@ export default function PatientDetailPage() {
 
   const [patient, setPatient] = useState<Patient | null>(null);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
+  const [analysisPreviews, setAnalysisPreviews] = useState<Record<number, AnalysisPreviewData>>({});
+  const [previewsLoading, setPreviewsLoading] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [creatingAnalysis, setCreatingAnalysis] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -190,19 +259,108 @@ export default function PatientDetailPage() {
     return () => clearTimeout(timeout);
   }, [feedback]);
 
+  useEffect(() => {
+    if (!analyses.length) {
+      setAnalysisPreviews({});
+      setPreviewsLoading(false);
+      return;
+    }
+
+    let active = true;
+
+    const loadPreviews = async () => {
+      const missing = analyses.filter((item) => !analysisPreviews[item.id]);
+      if (!missing.length) {
+        setPreviewsLoading(false);
+        return;
+      }
+
+      setPreviewsLoading(true);
+
+      for (const analysisItem of missing) {
+        try {
+          const detail = await analysisAPI.get(analysisItem.id);
+          if (!active) {
+            return;
+          }
+
+          const firstImage: AnalysisImage | undefined = detail?.images?.[0];
+
+          setAnalysisPreviews((prev) => ({
+            ...prev,
+            [analysisItem.id]: {
+              imageUrl: resolveImageUrl(firstImage) ?? null,
+              detections: detail?.total_findings ?? analysisItem.total_findings,
+              label: detail?.dominant_label ?? analysisItem.dominant_label ?? null,
+              category: detail?.dominant_category ?? analysisItem.dominant_category ?? null,
+              completedAt: detail?.completed_at ?? analysisItem.completed_at ?? null,
+              createdAt: detail?.created_at ?? analysisItem.created_at,
+              status: detail?.status ?? analysisItem.status,
+            },
+          }));
+        } catch (err) {
+          if (!active) {
+            return;
+          }
+          console.error("Failed to load analysis preview", err);
+          setAnalysisPreviews((prev) => ({
+            ...prev,
+            [analysisItem.id]: {
+              imageUrl: null,
+              detections: analysisItem.total_findings,
+              label: analysisItem.dominant_label ?? null,
+              category: analysisItem.dominant_category ?? null,
+              completedAt: analysisItem.completed_at,
+              createdAt: analysisItem.created_at,
+              status: analysisItem.status,
+            },
+          }));
+        }
+      }
+
+      if (active) {
+        setPreviewsLoading(false);
+      }
+    };
+
+    void loadPreviews();
+
+    return () => {
+      active = false;
+    };
+  }, [analyses, analysisPreviews]);
+
   const stats = useMemo(() => {
     const totalAnalyses = analyses.length;
     const completed = analyses.filter((item) => item.status === "COMPLETED").length;
-    const pending = analyses.filter((item) => item.status === "PENDING" || item.status === "PROCESSING").length;
+    const failed = analyses.filter((item) => item.status === "FAILED").length;
+    const monitoring = Math.max(totalAnalyses - completed - failed, 0);
     const totalFindings = analyses.reduce((sum, item) => sum + (item.total_findings || 0), 0);
 
     return {
       totalAnalyses,
       completed,
-      pending,
+      failed,
+      monitoring,
       totalFindings,
     };
   }, [analyses]);
+  const statusBreakdown = useMemo(
+    () => [
+      { label: "Bajarilgan", value: stats.completed, accent: "bg-emerald-500" },
+      { label: "Monitoring navbati", value: stats.monitoring, accent: "bg-indigo-500" },
+      { label: "Muammoli", value: stats.failed, accent: "bg-rose-500" },
+    ],
+    [stats.completed, stats.monitoring, stats.failed]
+  );
+  const latestAnalyses = useMemo(() => {
+    return [...analyses]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 4);
+  }, [analyses]);
+  const monitoringScore = stats.totalAnalyses
+    ? Math.round((stats.completed / Math.max(stats.totalAnalyses, 1)) * 100)
+    : 0;
 
   const handleEditSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -245,6 +403,69 @@ export default function PatientDetailPage() {
     } finally {
       setDeleting(false);
       setShowDeleteModal(false);
+    }
+  };
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setUploadFile(file);
+  };
+
+  const handleUploadSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!patient || !uploadFile) return;
+
+    try {
+      setCreatingAnalysis(true);
+      const created = await analysisAPI.create(uploadFile, patient.id);
+      const detailId: number | undefined =
+        created?.id ?? created?.analysis_id ?? created?.analysis?.id ?? created?.data?.id;
+      const detail = detailId ? await analysisAPI.get(detailId) : null;
+
+      if (!detail?.id) {
+        setFeedback({
+          type: "success",
+          message: "Yangi tahlil qabul qilindi. Natijalar tayyor boʼlgach avtomatik qoʼshiladi.",
+        });
+      } else {
+        const normalized: Analysis = {
+          id: detail.id,
+          patient_id: detail.patient_id ?? patient.id,
+          mode: detail.mode,
+          status: detail.status,
+          total_findings: detail.total_findings,
+          dominant_label: detail.dominant_label,
+          dominant_category: detail.dominant_category,
+          created_at: detail.created_at,
+          completed_at: detail.completed_at,
+        };
+
+        setAnalyses((prev) => [normalized, ...prev.filter((item) => item.id !== normalized.id)]);
+
+        const firstImage: AnalysisImage | undefined = detail?.images?.[0];
+        setAnalysisPreviews((prev) => ({
+          ...prev,
+          [normalized.id]: {
+            imageUrl: resolveImageUrl(firstImage) ?? null,
+            detections: detail?.total_findings ?? normalized.total_findings,
+            label: normalized.dominant_label,
+            category: normalized.dominant_category,
+            completedAt: normalized.completed_at,
+            createdAt: normalized.created_at,
+            status: normalized.status,
+          },
+        }));
+
+        setFeedback({ type: "success", message: "Yangi tahlil qabul qilindi va monitoringga qoʼshildi." });
+      }
+
+      setUploadFile(null);
+      event.currentTarget.reset();
+    } catch (err: any) {
+      console.error("Failed to upload analysis", err);
+      setFeedback({ type: "error", message: err?.message || "Faylni yuklashda xatolik" });
+    } finally {
+      setCreatingAnalysis(false);
     }
   };
 
@@ -418,12 +639,13 @@ export default function PatientDetailPage() {
               </div>
             </div>
 
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               {[
                 { label: "Jami tahlillar", value: stats.totalAnalyses, accent: "from-cyan-500 to-sky-500" },
                 { label: "Bajarilgan", value: stats.completed, accent: "from-emerald-500 to-teal-500" },
-                { label: "Kutilmoqda", value: stats.pending, accent: "from-amber-500 to-orange-500" },
-                { label: "Topilmalar", value: stats.totalFindings, accent: "from-rose-500 to-pink-500" },
+                { label: "Monitoring navbati", value: stats.monitoring, accent: "from-indigo-500 to-blue-500" },
+                { label: "Muammoli natijalar", value: stats.failed, accent: "from-rose-500 to-pink-500" },
+                { label: "Topilmalar", value: stats.totalFindings, accent: "from-purple-500 to-fuchsia-500" },
               ].map((item, index) => (
                 <motion.div
                   key={item.label}
@@ -495,6 +717,156 @@ export default function PatientDetailPage() {
           initial="hidden"
           animate="visible"
           variants={cardVariants}
+          custom={1.4}
+          className="grid gap-6 xl:grid-cols-[2fr,1fr]"
+        >
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={cardVariants}
+            className="rounded-3xl border border-slate-200/60 bg-white/95 p-6 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/70"
+          >
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Monitoring paneli</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">AI pipeline holatini real vaqt rejimida kuzating</p>
+              </div>
+              <div className="inline-flex items-center gap-3 rounded-2xl border border-emerald-200/60 bg-emerald-50/60 px-4 py-2 text-sm font-medium text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+                <Stethoscope className="h-4 w-4" />
+                Barqarorlik: {monitoringScore}%
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-4 sm:grid-cols-3">
+              {statusBreakdown.map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-2xl border border-slate-200/60 bg-white/80 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60"
+                >
+                  <span className={`inline-flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold text-white ${item.accent}`}>
+                    {item.label}
+                  </span>
+                  <p className="mt-3 text-3xl font-semibold text-slate-900 dark:text-white">
+                    {item.value.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">ta tahlil</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-slate-200/60 bg-white/80 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  <RefreshCw className="h-4 w-4 text-indigo-500" />
+                  Soʼnggi monitoring
+                </div>
+                {previewsLoading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+              </div>
+              <div className="mt-4 space-y-3">
+                {latestAnalyses.length === 0 ? (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Hozircha monitoring natijalari mavjud emas.</p>
+                ) : (
+                  latestAnalyses.map((analysisItem) => {
+                    const meta = statusMeta(analysisItem.status);
+                    const preview = analysisPreviews[analysisItem.id];
+                    return (
+                      <div
+                        key={analysisItem.id}
+                        className="flex flex-col gap-2 rounded-xl border border-slate-200/60 bg-white/70 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/50 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${meta.badge}`}>
+                            {meta.icon}
+                            {meta.label}
+                          </div>
+                          <span className="font-medium text-slate-800 dark:text-slate-100">#{analysisItem.id}</span>
+                          {preview?.label && (
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              {preview.label}
+                            </span>
+                          )}
+                          {typeof preview?.detections === "number" && (
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              {preview.detections} topilma
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                          <TrendingUp className="h-3.5 w-3.5 text-indigo-500" />
+                          {formatDateTime(preview?.completedAt || analysisItem.created_at)}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={cardVariants}
+            className="rounded-3xl border border-cyan-200/60 bg-white/95 p-6 shadow-xl backdrop-blur dark:border-cyan-500/30 dark:bg-slate-900/70"
+          >
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-gradient-to-br from-cyan-500 to-emerald-500 p-2.5 text-white shadow-md">
+                <UploadCloud className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Yangi tahlil yuklash</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Bemor kartasiga toʼgʼridan toʼgʼri AI tahlil qoʼshing</p>
+              </div>
+            </div>
+            <form onSubmit={handleUploadSubmit} className="mt-6 space-y-4">
+              <label className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-cyan-300 bg-cyan-50/50 px-4 py-10 text-center transition hover:border-cyan-400 hover:bg-cyan-50 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:hover:border-cyan-400">
+                <UploadCloud className="h-8 w-8 text-cyan-600 dark:text-cyan-300" />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-100">
+                    {uploadFile ? uploadFile.name : "Mammografiya rasmini tanlang"}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    DICOM yoki JPEG/PNG formatlari qoʼllab-quvvatlanadi
+                  </p>
+                </div>
+                <input
+                  type="file"
+                  accept="image/*,.dcm"
+                  onChange={handleFileChange}
+                  className="sr-only"
+                />
+              </label>
+              {uploadFile && (
+                <div className="flex items-center justify-between rounded-2xl border border-slate-200/60 bg-white/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+                  <span>{(uploadFile.size / (1024 * 1024)).toFixed(2)} MB</span>
+                  <button
+                    type="button"
+                    onClick={() => setUploadFile(null)}
+                    className="text-rose-500 hover:text-rose-400 dark:text-rose-300"
+                  >
+                    Tozalash
+                  </button>
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={!uploadFile || creatingAnalysis}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:from-cyan-500 hover:to-emerald-500 disabled:opacity-60"
+              >
+                {creatingAnalysis && <Loader2 className="h-4 w-4 animate-spin" />}
+                Yuklashni boshlash
+              </button>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Natija qayta ishlangandan soʼng monitoring panelida va tahlillar tarixida avtomatik paydo boʼladi.
+              </p>
+            </form>
+          </motion.div>
+        </motion.section>
+
+        <motion.section
+          initial="hidden"
+          animate="visible"
+          variants={cardVariants}
           custom={2}
           className="rounded-3xl border border-slate-200/60 bg-white/95 p-6 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/70"
         >
@@ -514,45 +886,92 @@ export default function PatientDetailPage() {
             <div className="space-y-3">
               {analyses.map((analysis, index) => {
                 const meta = statusMeta(analysis.status);
+                const preview = analysisPreviews[analysis.id];
                 return (
                   <motion.div
                     key={analysis.id}
                     initial={{ opacity: 0, y: 12 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.05 }}
-                    className="flex flex-col gap-3 rounded-2xl border border-slate-200/60 bg-white/80 p-4 shadow-sm transition hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/70"
+                    className="grid gap-4 rounded-2xl border border-slate-200/60 bg-white/80 p-4 shadow-sm transition hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/70 lg:grid-cols-[220px,1fr]"
                   >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-emerald-500 text-white">
-                          <FileText className="w-5 h-5" />
+                    <div className="relative overflow-hidden rounded-2xl border border-slate-200/70 bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60">
+                      {preview?.imageUrl ? (
+                        <img
+                          src={preview.imageUrl}
+                          alt={`Tahlil ${analysis.id}`}
+                          className="h-full w-full object-cover"
+                          onError={(event) => {
+                            const target = event.currentTarget;
+                            target.onerror = null;
+                            target.src = "/analysis-placeholder.svg";
+                          }}
+                        />
+                      ) : (
+                        <div className="flex h-full min-h-[180px] items-center justify-center px-4 text-center text-xs text-slate-500 dark:text-slate-400">
+                          Rasm tayyorlanmoqda yoki mavjud emas
                         </div>
-                        <div>
-                          <p className="text-sm font-medium text-slate-800 dark:text-slate-100">Tahlil #{analysis.id}</p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">Yaratilgan sana: {formatDate(analysis.created_at)}</p>
-                        </div>
-                      </div>
-                      <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${meta.badge}`}>
+                      )}
+                      <div className={`absolute left-3 top-3 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${meta.badge}`}>
                         {meta.icon}
                         {meta.label}
-                      </span>
+                      </div>
+                      {typeof preview?.detections === "number" && (
+                        <div className="absolute bottom-3 right-3 rounded-full bg-slate-900/80 px-3 py-1 text-xs font-semibold text-white shadow-lg">
+                          {preview.detections} topilma
+                        </div>
+                      )}
                     </div>
-                    <div className="grid gap-4 text-sm text-slate-600 dark:text-slate-300 sm:grid-cols-4">
-                      <div>
-                        <span className="text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">Rejim</span>
-                        <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{analysis.mode.toUpperCase()}</p>
+                    <div className="flex flex-col gap-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-emerald-500 text-white">
+                            <FileText className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-slate-800 dark:text-slate-100">Tahlil #{analysis.id}</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              Yaratilgan: {formatDateTime(preview?.createdAt || analysis.created_at)}
+                            </p>
+                          </div>
+                        </div>
+                        {preview?.label && (
+                          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200/60 bg-white/70 px-3 py-1 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+                            Dominant: {preview.label}
+                          </span>
+                        )}
                       </div>
-                      <div>
-                        <span className="text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">Topilmalar</span>
-                        <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{analysis.total_findings}</p>
+                      <div className="grid gap-4 text-sm text-slate-600 dark:text-slate-300 sm:grid-cols-2 xl:grid-cols-4">
+                        <div>
+                          <span className="text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">Rejim</span>
+                          <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{analysis.mode.toUpperCase()}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">Topilmalar</span>
+                          <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{analysis.total_findings}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">Dominant kategoriya</span>
+                          <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{analysis.dominant_category || "Aniqlanmagan"}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">Dominant label</span>
+                          <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{analysis.dominant_label || "Aniqlanmagan"}</p>
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">Dominant kategoriya</span>
-                        <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{analysis.dominant_category || "Aniqlanmagan"}</p>
-                      </div>
-                      <div>
-                        <span className="text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">Dominant label</span>
-                        <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{analysis.dominant_label || "Aniqlanmagan"}</p>
+                      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+                        <div>
+                          {preview?.completedAt
+                            ? `Yakunlangan: ${formatDateTime(preview.completedAt)}`
+                            : "Natija tayyorlanmoqda"}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => router.push(`/analyses/${analysis.id}`)}
+                          className="inline-flex items-center gap-2 rounded-xl border border-cyan-200/60 px-3 py-1.5 text-sm font-semibold text-cyan-600 transition hover:border-cyan-300 dark:border-cyan-500/30 dark:text-cyan-300 dark:hover:border-cyan-400/60"
+                        >
+                          Batafsil koʼrish
+                        </button>
                       </div>
                     </div>
                   </motion.div>

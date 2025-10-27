@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, SyntheticEvent } from "react";
+import { useState, useEffect, useRef, SyntheticEvent, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -15,15 +15,14 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
-  Download,
-  Share2,
   Layers,
   Trash2,
   FileText,
-  Printer,
   Loader2,
+  RefreshCw,
+  X,
 } from "lucide-react";
-import { analysisAPI, API_BASE_URL } from "@/lib/api";
+import { analysisAPI, API_BASE_URL, patientAPI } from "@/lib/api";
 import jsPDF from "jspdf";
 
 type Detection = {
@@ -77,11 +76,35 @@ type Analysis = {
 
 const IMAGE_PLACEHOLDER = "/analysis-placeholder.svg";
 
+type PatientSummary = {
+  id: number;
+  full_name?: string | null;
+  date_of_birth?: string | null;
+  medical_record_number?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
+
+const computeAge = (value?: string | null) => {
+  if (!value) return null;
+  const birth = new Date(value);
+  if (Number.isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+    age -= 1;
+  }
+  return age;
+};
+
 export default function AnalysisDetailPage() {
   const params = useParams();
   const router = useRouter();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const fullscreenCanvasRef = useRef<HTMLCanvasElement>(null);
+  const fullscreenImageRef = useRef<HTMLImageElement>(null);
 
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,7 +114,13 @@ export default function AnalysisDetailPage() {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const reportRef = useRef<HTMLDivElement>(null);
+  const [analysisPatient, setAnalysisPatient] = useState<PatientSummary | null>(null);
+  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
+  const [fullscreenZoom, setFullscreenZoom] = useState(1);
+  const patientAge = useMemo(
+    () => computeAge(analysisPatient?.date_of_birth ?? undefined),
+    [analysisPatient?.date_of_birth]
+  );
 
   useEffect(() => {
     loadAnalysis();
@@ -99,9 +128,43 @@ export default function AnalysisDetailPage() {
 
   useEffect(() => {
     if (selectedImage && imageLoaded) {
-      drawDetections();
+      drawDetections(imageRef.current, canvasRef.current);
+    } else if (!showDetections && canvasRef.current) {
+      const ctx = canvasRef.current.getContext("2d");
+      ctx?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     }
   }, [selectedImage, showDetections, zoom, imageLoaded]);
+
+  useEffect(() => {
+    if (!isFullscreenOpen) {
+      return;
+    }
+    const imageElement = fullscreenImageRef.current;
+    if (imageElement && selectedImage) {
+      drawDetections(imageElement, fullscreenCanvasRef.current);
+    }
+  }, [isFullscreenOpen, selectedImage, showDetections, fullscreenZoom]);
+
+  useEffect(() => {
+    setZoom(1);
+  }, [selectedImage?.id]);
+
+  useEffect(() => {
+    if (isFullscreenOpen) {
+      setFullscreenZoom(1);
+    }
+  }, [isFullscreenOpen, selectedImage?.id]);
+
+  useEffect(() => {
+    if (!isFullscreenOpen) {
+      return undefined;
+    }
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isFullscreenOpen]);
 
   useEffect(() => {
     // Redraw multi-view canvases when showDetections changes
@@ -124,6 +187,17 @@ export default function AnalysisDetailPage() {
       setAnalysis(data);
       if (data.images.length > 0) {
         setSelectedImage(data.images[0]);
+      }
+      if (data.patient_id) {
+        try {
+          const patientDetail = await patientAPI.get(data.patient_id);
+          setAnalysisPatient(patientDetail);
+        } catch (patientError) {
+          console.error("Failed to load patient info", patientError);
+          setAnalysisPatient(null);
+        }
+      } else {
+        setAnalysisPatient(null);
       }
     } catch (error) {
       console.error("Failed to load analysis:", error);
@@ -168,6 +242,41 @@ export default function AnalysisDetailPage() {
       });
     };
 
+    const formatDate = (value?: string | null, withTime = false) => {
+      if (!value) return "—";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return withTime ? date.toLocaleString("uz-UZ") : date.toLocaleDateString("uz-UZ");
+    };
+
+    const formatDuration = (ms?: number | null) => {
+      if (!ms || Number.isNaN(ms) || ms <= 0) return "—";
+      const totalSeconds = Math.floor(ms / 1000);
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      const parts: string[] = [];
+      if (hours) parts.push(`${hours} soat`);
+      if (minutes) parts.push(`${minutes} daqiqa`);
+      if (seconds || (!hours && !minutes)) parts.push(`${seconds} soniya`);
+      return parts.join(" ");
+    };
+
+    const formatStatus = (status: string) => {
+      switch (status?.toUpperCase?.()) {
+        case "COMPLETED":
+          return "Bajarilgan";
+        case "PROCESSING":
+          return "Monitoringda";
+        case "PENDING":
+          return "Navbatda";
+        case "FAILED":
+          return "Xatolik";
+        default:
+          return status;
+      }
+    };
+
     try {
       setExporting(true);
 
@@ -177,6 +286,13 @@ export default function AnalysisDetailPage() {
       const horizontalMargin = 20;
       let yPosition = 20;
 
+      const ensureSpace = (height: number) => {
+        if (yPosition + height > pageHeight - 20) {
+          pdf.addPage();
+          yPosition = 24;
+        }
+      };
+
       pdf.setFillColor(99, 102, 241);
       pdf.rect(0, 0, pageWidth, 16, "F");
       pdf.setTextColor(255, 255, 255);
@@ -184,66 +300,162 @@ export default function AnalysisDetailPage() {
       pdf.setFont("helvetica", "bold");
       pdf.text("Koʼkrak Saratoni Tahlili", horizontalMargin, 11);
 
-      yPosition = 28;
       pdf.setTextColor(31, 41, 55);
       pdf.setFontSize(11);
       pdf.setFont("helvetica", "normal");
-      pdf.text(`Tahlil #${analysis.id} · ${new Date(analysis.created_at).toLocaleDateString("uz-UZ")}`, horizontalMargin, yPosition);
-
-      yPosition += 12;
-      pdf.setFontSize(13);
-      pdf.setFont("helvetica", "bold");
-      pdf.text("Umumiy maʼlumot", horizontalMargin, yPosition);
-
-      const detailLines = [
-        `Status: ${analysis.status}`,
-        `Jami topilmalar: ${analysis.total_findings}`,
-        `Asosiy kategoriya: ${analysis.dominant_category || "Nomaʼlum"}`,
-        `Asosiy label: ${analysis.dominant_label || "Nomaʼlum"}`,
-      ];
-
-      pdf.setFontSize(10);
-      pdf.setFont("helvetica", "normal");
-      detailLines.forEach((line) => {
-        yPosition += 6;
-        pdf.text(line, horizontalMargin + 4, yPosition);
+      yPosition = 26;
+      pdf.text(`Tahlil #${analysis.id}`, horizontalMargin, yPosition);
+      pdf.text(`Yaratilgan: ${formatDate(analysis.created_at, true)}`, pageWidth - horizontalMargin, yPosition, {
+        align: "right",
       });
 
-      yPosition += 14;
-      pdf.setFontSize(13);
+      yPosition += 12;
       pdf.setFont("helvetica", "bold");
-      pdf.text("Rasmlar va topilmalar", horizontalMargin, yPosition);
+      pdf.setFontSize(13);
+      pdf.text("Umumiy maʼlumot", horizontalMargin, yPosition);
+
+      yPosition += 8;
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10);
+
+      const durationMs = analysis.completed_at
+        ? new Date(analysis.completed_at).getTime() - new Date(analysis.created_at).getTime()
+        : null;
+
+      const metaLines = [
+        `Status: ${formatStatus(analysis.status)}`,
+        `Rejim: ${analysis.mode.toUpperCase()}`,
+        `Jami topilmalar: ${analysis.total_findings}`,
+        `Dominant kategoriya: ${analysis.dominant_category ?? "Aniqlanmagan"}`,
+        `Dominant label: ${analysis.dominant_label ?? "Aniqlanmagan"}`,
+        `Tugallanish vaqti: ${formatDate(analysis.completed_at, true)}`,
+        `Davomiyligi: ${formatDuration(durationMs)}`,
+        `Rasmlar soni: ${analysis.images.length}`,
+      ];
+
+      metaLines.forEach((line) => {
+        ensureSpace(6);
+        pdf.text(line, horizontalMargin + 4, yPosition);
+        yPosition += 6;
+      });
+
+      if (analysisPatient) {
+        ensureSpace(28);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(13);
+        pdf.text("Bemor maʼlumotlari", horizontalMargin, yPosition + 4);
+        yPosition += 10;
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(10);
+        const patientAgeValue = computeAge(analysisPatient.date_of_birth ?? undefined);
+        const patientLines = [
+          `Ism-familiya: ${analysisPatient.full_name ?? "—"}`,
+          `Tibbiy karta (MRN): ${analysisPatient.medical_record_number ?? "—"}`,
+          `Yosh: ${patientAgeValue !== null ? `${patientAgeValue}` : "—"}`,
+          `Aloqa: ${analysisPatient.phone ?? "—"}${analysisPatient.email ? ` / ${analysisPatient.email}` : ""}`,
+        ];
+        patientLines.forEach((line) => {
+          ensureSpace(6);
+          pdf.text(line, horizontalMargin + 4, yPosition);
+          yPosition += 6;
+        });
+      }
+
+      if (analysis.summary && Object.keys(analysis.summary).length > 0) {
+        ensureSpace(12);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(13);
+        pdf.text("AI xulosasi", horizontalMargin, yPosition + 4);
+        yPosition += 10;
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(10);
+        const summaryLines = Object.entries(analysis.summary).map(([key, value]) => {
+          const normalized = typeof value === "string" ? value : JSON.stringify(value);
+          return `${key}: ${normalized}`;
+        });
+        summaryLines.forEach((line) => {
+          const wrapped = pdf.splitTextToSize(`• ${line}`, pageWidth - horizontalMargin * 2);
+          ensureSpace(wrapped.length * 5 + 2);
+          wrapped.forEach((wrappedLine) => {
+            pdf.text(wrappedLine, horizontalMargin + 4, yPosition);
+            yPosition += 5;
+          });
+        });
+      }
+
+      if (analysis.findings_description?.trim()) {
+        const findingsText = analysis.findings_description.trim();
+        const wrapped = pdf.splitTextToSize(findingsText, pageWidth - horizontalMargin * 2);
+        ensureSpace(12 + wrapped.length * 5);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(13);
+        pdf.text("Topilmalar tavsifi", horizontalMargin, yPosition + 4);
+        yPosition += 10;
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(10);
+        wrapped.forEach((line) => {
+          pdf.text(line, horizontalMargin + 4, yPosition);
+          yPosition += 5;
+        });
+      }
+
+      if (analysis.recommendations?.trim()) {
+        const recommendationsText = analysis.recommendations.trim();
+        const wrapped = pdf.splitTextToSize(recommendationsText, pageWidth - horizontalMargin * 2);
+        ensureSpace(12 + wrapped.length * 5);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(13);
+        pdf.text("Tavsiyalar", horizontalMargin, yPosition + 4);
+        yPosition += 10;
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(10);
+        wrapped.forEach((line) => {
+          pdf.text(line, horizontalMargin + 4, yPosition);
+          yPosition += 5;
+        });
+      }
+
+      const detectionSummaryMap = new Map<string, { count: number; confidences: number[] }>();
+      analysis.images.forEach((img) => {
+        img.detections_data?.detections?.forEach((det) => {
+          const value = detectionSummaryMap.get(det.label) ?? { count: 0, confidences: [] };
+          value.count += 1;
+          value.confidences.push(det.confidence);
+          detectionSummaryMap.set(det.label, value);
+        });
+      });
+
+      ensureSpace(12);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(13);
+      pdf.text("Rasmlar va topilmalar", horizontalMargin, yPosition + 4);
+      yPosition += 10;
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10);
 
       if (analysis.images.length === 0) {
+        ensureSpace(6);
+        pdf.text("Ushbu tahlil uchun rasm maʼlumotlari mavjud emas.", horizontalMargin + 4, yPosition);
         yPosition += 10;
-        pdf.setFontSize(10);
-        pdf.setFont("helvetica", "normal");
-        pdf.text("Ushbu tahlil uchun rasm maʼlumotlari mavjud emas.", horizontalMargin, yPosition);
       }
 
       for (const img of analysis.images) {
-        if (yPosition > pageHeight - 80) {
-          pdf.addPage();
-          yPosition = 24;
-        }
-
-        yPosition += 8;
-        pdf.setFontSize(11);
+        ensureSpace(18);
         pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(11);
         pdf.setTextColor(79, 70, 229);
         pdf.text(img.view_type.toUpperCase(), horizontalMargin, yPosition);
-
-        yPosition += 6;
-        pdf.setFontSize(10);
+        pdf.setTextColor(31, 41, 55);
         pdf.setFont("helvetica", "normal");
-        pdf.setTextColor(55, 65, 81);
+        pdf.setFontSize(10);
+        yPosition += 6;
         pdf.text(`Topilmalar: ${img.detections_count}`, horizontalMargin, yPosition);
+        yPosition += 4;
 
         try {
           const assetUrl = getImageAssetUrl(img);
           if (!assetUrl) {
-            console.warn(`No asset URL available for image ${img.id}`);
-            continue;
+            throw new Error("Rasm URL topilmadi");
           }
 
           const imageElement = await loadImageForExport(assetUrl);
@@ -254,23 +466,30 @@ export default function AnalysisDetailPage() {
           const canvasWidth = Math.max(Math.round(originalWidth * scale), 1);
           const canvasHeight = Math.max(Math.round(originalHeight * scale), 1);
 
-          const canvas = document.createElement("canvas");
-          canvas.width = canvasWidth;
-          canvas.height = canvasHeight;
-          const ctx = canvas.getContext("2d");
-
-          if (!ctx) {
+          const baseCanvas = document.createElement("canvas");
+          baseCanvas.width = canvasWidth;
+          baseCanvas.height = canvasHeight;
+          const baseCtx = baseCanvas.getContext("2d");
+          if (!baseCtx) {
             throw new Error("Canvas tayyorlashda xatolik");
           }
+          baseCtx.drawImage(imageElement, 0, 0, canvasWidth, canvasHeight);
 
-          ctx.drawImage(imageElement, 0, 0, canvasWidth, canvasHeight);
+          const annotatedCanvas = document.createElement("canvas");
+          annotatedCanvas.width = canvasWidth;
+          annotatedCanvas.height = canvasHeight;
+          const annotatedCtx = annotatedCanvas.getContext("2d");
+          if (!annotatedCtx) {
+            throw new Error("Canvas tayyorlashda xatolik");
+          }
+          annotatedCtx.drawImage(baseCanvas, 0, 0);
 
           if (img.detections_data?.detections?.length) {
             const accentBackground = "rgba(15, 23, 42, 0.85)";
             const paddingX = 6;
             const labelHeight = 22;
 
-            img.detections_data.detections.forEach((det: Detection) => {
+            img.detections_data.detections.forEach((det) => {
               const { x1, y1, x2, y2 } = det.bbox;
               const scaledX1 = x1 * scale;
               const scaledY1 = y1 * scale;
@@ -278,65 +497,107 @@ export default function AnalysisDetailPage() {
               const scaledY2 = y2 * scale;
               const color = getCategoryColor(det.label);
 
-              ctx.strokeStyle = color;
-              ctx.lineWidth = 3;
-              ctx.strokeRect(scaledX1, scaledY1, Math.max(scaledX2 - scaledX1, 1), Math.max(scaledY2 - scaledY1, 1));
+              annotatedCtx.strokeStyle = color;
+              annotatedCtx.lineWidth = 3;
+              annotatedCtx.strokeRect(
+                scaledX1,
+                scaledY1,
+                Math.max(scaledX2 - scaledX1, 1),
+                Math.max(scaledY2 - scaledY1, 1)
+              );
 
               const labelText = `${det.label} ${(det.confidence * 100).toFixed(0)}%`;
-              ctx.font = "600 15px 'Helvetica Neue', Helvetica, Arial, sans-serif";
-              const metrics = ctx.measureText(labelText);
+              annotatedCtx.font = "600 15px 'Helvetica Neue', Helvetica, Arial, sans-serif";
+              const metrics = annotatedCtx.measureText(labelText);
               const backgroundY = Math.max(scaledY1 - labelHeight - 2, 0);
 
-              ctx.fillStyle = color;
-              ctx.fillRect(scaledX1, backgroundY, 6, labelHeight);
-              ctx.fillStyle = accentBackground;
-              ctx.fillRect(scaledX1 + 6, backgroundY, metrics.width + paddingX * 2, labelHeight);
+              annotatedCtx.fillStyle = color;
+              annotatedCtx.fillRect(scaledX1, backgroundY, 6, labelHeight);
+              annotatedCtx.fillStyle = accentBackground;
+              annotatedCtx.fillRect(scaledX1 + 6, backgroundY, metrics.width + paddingX * 2, labelHeight);
 
-              ctx.fillStyle = "#f8fafc";
-              ctx.fillText(labelText, scaledX1 + paddingX + 8, backgroundY + labelHeight - 6);
+              annotatedCtx.fillStyle = "#f8fafc";
+              annotatedCtx.fillText(labelText, scaledX1 + paddingX + 8, backgroundY + labelHeight - 6);
             });
           }
 
-          const imgWidth = pageWidth - horizontalMargin * 2;
-          const imgHeight = (canvasHeight * imgWidth) / canvasWidth;
-          yPosition += 8;
+          const displayWidth = pageWidth - horizontalMargin * 2;
+          const displayHeight = (canvasHeight * displayWidth) / canvasWidth;
 
-          if (yPosition + imgHeight > pageHeight - 24) {
-            pdf.addPage();
-            yPosition = 24;
-          }
+          const originalDataUrl = baseCanvas.toDataURL("image/jpeg", 0.92);
+          const annotatedDataUrl = annotatedCanvas.toDataURL("image/jpeg", 0.92);
 
-          const imgData = canvas.toDataURL("image/jpeg", 0.92);
-          pdf.addImage(imgData, "JPEG", horizontalMargin, yPosition, imgWidth, imgHeight);
-          yPosition += imgHeight + 6;
+          ensureSpace(12 + displayHeight);
+          pdf.setFont("helvetica", "italic");
+          pdf.setFontSize(9);
+          pdf.text("Original rasm", horizontalMargin, yPosition);
+          yPosition += 6;
+          ensureSpace(displayHeight + 6);
+          pdf.addImage(originalDataUrl, "JPEG", horizontalMargin, yPosition, displayWidth, displayHeight);
+          yPosition += displayHeight + 6;
+
+          ensureSpace(12 + displayHeight);
+          pdf.setFont("helvetica", "italic");
+          pdf.setFontSize(9);
+          pdf.text("Annotatsiya qilingan rasm", horizontalMargin, yPosition);
+          yPosition += 6;
+          ensureSpace(displayHeight + 6);
+          pdf.addImage(annotatedDataUrl, "JPEG", horizontalMargin, yPosition, displayWidth, displayHeight);
+          yPosition += displayHeight + 6;
 
           if (img.detections_data?.detections?.length) {
-            pdf.setFontSize(10);
+            ensureSpace(8);
             pdf.setFont("helvetica", "bold");
-            pdf.setTextColor(31, 41, 55);
+            pdf.setFontSize(10);
             pdf.text("Topilmalar roʼyxati:", horizontalMargin, yPosition);
+            yPosition += 5;
             pdf.setFont("helvetica", "normal");
             pdf.setFontSize(9);
 
-            for (const [index, det] of img.detections_data.detections.entries()) {
-              if (yPosition > pageHeight - 18) {
-                pdf.addPage();
-                yPosition = 24;
-              }
+            img.detections_data.detections.forEach((det, index) => {
+              ensureSpace(5);
+              pdf.text(
+                `${index + 1}. ${det.label} · ${(det.confidence * 100).toFixed(1)}%`,
+                horizontalMargin + 4,
+                yPosition
+              );
               yPosition += 5;
-              pdf.text(`${index + 1}. ${det.label} · ${(det.confidence * 100).toFixed(1)}%`, horizontalMargin + 4, yPosition);
-            }
+            });
           }
+
+          yPosition += 6;
         } catch (error) {
           console.error(`Failed to prepare image ${img.id}:`, error);
-          yPosition += 10;
+          ensureSpace(10);
+          pdf.setFont("helvetica", "normal");
           pdf.setFontSize(10);
           pdf.setTextColor(220, 38, 38);
           pdf.text("Rasmni eksport qilishda xatolik", horizontalMargin, yPosition);
           pdf.setTextColor(31, 41, 55);
+          yPosition += 10;
         }
+      }
 
+      if (detectionSummaryMap.size) {
+        ensureSpace(12);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(13);
+        pdf.text("Topilmalar statistikasi", horizontalMargin, yPosition + 4);
         yPosition += 10;
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(10);
+
+        detectionSummaryMap.forEach((value, key) => {
+          const avgConfidence =
+            value.confidences.reduce((sum, item) => sum + item, 0) / Math.max(value.confidences.length, 1);
+          ensureSpace(6);
+          pdf.text(
+            `• ${key}: ${value.count} ta · Oʼrtacha ishonch ${(avgConfidence * 100).toFixed(1)}%`,
+            horizontalMargin + 4,
+            yPosition
+          );
+          yPosition += 6;
+        });
       }
 
       const totalPages = pdf.getNumberOfPages();
@@ -345,7 +606,12 @@ export default function AnalysisDetailPage() {
         pdf.setFontSize(8);
         pdf.setTextColor(100, 116, 139);
         pdf.text("Koʼkrak saratoni AI diagnostika tizimi", pageWidth / 2, pageHeight - 11, { align: "center" });
-        pdf.text(`Sahifa ${pageIndex} / ${totalPages} · ${new Date().toLocaleDateString("uz-UZ")}`, pageWidth / 2, pageHeight - 6, { align: "center" });
+        pdf.text(
+          `Sahifa ${pageIndex} / ${totalPages} · ${new Date().toLocaleDateString("uz-UZ")}`,
+          pageWidth / 2,
+          pageHeight - 6,
+          { align: "center" }
+        );
       }
 
       pdf.save(`tahlil_${analysis.id}_${new Date().toISOString().split("T")[0]}.pdf`);
@@ -356,58 +622,60 @@ export default function AnalysisDetailPage() {
       setExporting(false);
     }
   };
+  const drawDetections = (
+    imageElement: HTMLImageElement | null = imageRef.current,
+    canvasElement: HTMLCanvasElement | null = canvasRef.current
+  ) => {
+    if (!canvasElement || !imageElement || !selectedImage) return;
 
-
-  const drawDetections = () => {
-    if (!canvasRef.current || !imageRef.current || !selectedImage) return;
-
-    const canvas = canvasRef.current;
-    const img = imageRef.current;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvasElement.getContext("2d");
     if (!ctx) return;
 
-    // Set canvas size to match image display size
-    const rect = img.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
+    const rect = imageElement.getBoundingClientRect();
+    const targetWidth = Math.max(rect.width, 1);
+    const targetHeight = Math.max(rect.height, 1);
 
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    canvasElement.width = targetWidth;
+    canvasElement.height = targetHeight;
 
-    if (!showDetections || !selectedImage.detections_data?.detections) return;
+    ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
-    const detections = selectedImage.detections_data.detections;
-    const scaleX = rect.width / (selectedImage.width || rect.width);
-    const scaleY = rect.height / (selectedImage.height || rect.height);
+    if (!showDetections || !selectedImage.detections_data?.detections?.length) {
+      return;
+    }
 
-    detections.forEach((detection, index) => {
+    const sourceWidth = Math.max(selectedImage.width ?? targetWidth, 1);
+    const sourceHeight = Math.max(selectedImage.height ?? targetHeight, 1);
+    const scaleX = targetWidth / sourceWidth;
+    const scaleY = targetHeight / sourceHeight;
+
+    selectedImage.detections_data.detections.forEach((detection) => {
       const { x1, y1, x2, y2 } = detection.bbox;
       const w = x2 - x1;
       const h = y2 - y1;
 
-      // Scale coordinates
       const scaledX = x1 * scaleX;
       const scaledY = y1 * scaleY;
       const scaledW = w * scaleX;
       const scaledH = h * scaleY;
 
-      // Draw bounding box
-      ctx.strokeStyle = getCategoryColor(detection.label);
+      const color = getCategoryColor(detection.label);
+
+      ctx.strokeStyle = color;
       ctx.lineWidth = 3;
       ctx.strokeRect(scaledX, scaledY, scaledW, scaledH);
 
-      // Draw label background
       const labelText = `${detection.label} (${(detection.confidence * 100).toFixed(1)}%)`;
       ctx.font = "bold 14px sans-serif";
       const textMetrics = ctx.measureText(labelText);
       const textHeight = 20;
+      const labelY = Math.max(scaledY - textHeight, 0);
 
-      ctx.fillStyle = getCategoryColor(detection.label);
-      ctx.fillRect(scaledX, scaledY - textHeight, textMetrics.width + 10, textHeight);
+      ctx.fillStyle = color;
+      ctx.fillRect(scaledX, labelY, textMetrics.width + 10, textHeight);
 
-      // Draw label text
       ctx.fillStyle = "white";
-      ctx.fillText(labelText, scaledX + 5, scaledY - 5);
+      ctx.fillText(labelText, scaledX + 5, labelY + textHeight - 6);
     });
   };
 
@@ -447,12 +715,23 @@ export default function AnalysisDetailPage() {
       return path;
     }
 
-    const trimmed = path.replace(/^\/+/, "");
-    const encoded = trimmed
+    const normalised = path.replace(/\\/g, "/").replace(/^\/+/, "");
+    const withoutUploads = normalised.startsWith("uploads/")
+      ? normalised.slice("uploads/".length)
+      : normalised;
+    const encoded = withoutUploads
       .split("/")
       .filter(Boolean)
       .map((segment) => encodeURIComponent(segment))
       .join("/");
+
+    if (!encoded) {
+      return null;
+    }
+
+    if (withoutUploads.startsWith("files/")) {
+      return `${API_BASE_URL}/${encoded}`;
+    }
 
     return `${API_BASE_URL}/files/${encoded}`;
   };
@@ -474,8 +753,9 @@ export default function AnalysisDetailPage() {
     target.dataset.fallbackApplied = "true";
     target.src = IMAGE_PLACEHOLDER;
 
-    if (target === imageRef.current) {
+    if (target === imageRef.current || target === fullscreenImageRef.current) {
       setImageLoaded(true);
+      drawDetections(imageRef.current, canvasRef.current);
     }
   };
 
@@ -549,10 +829,22 @@ export default function AnalysisDetailPage() {
                     {analysis.status}
                   </span>
                   {analysis.patient_id && (
-                    <span className="text-sm text-slate-600 dark:text-neutral-400 flex items-center gap-1">
-                      <User className="w-4 h-4" />
-                      Bemor #{analysis.patient_id}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600 dark:text-neutral-400">
+                      <span className="flex items-center gap-1">
+                        <User className="w-4 h-4" />
+                        {analysisPatient?.full_name ?? `Bemor #${analysis.patient_id}`}
+                      </span>
+                      {analysisPatient?.medical_record_number && (
+                        <span className="rounded-full border border-indigo-200/70 bg-indigo-50/70 px-2 py-0.5 text-xs font-semibold text-indigo-600 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300">
+                          MRN: {analysisPatient.medical_record_number}
+                        </span>
+                      )}
+                      {patientAge !== null && (
+                        <span className="text-xs text-slate-500 dark:text-neutral-500">
+                          {patientAge} yosh
+                        </span>
+                      )}
+                    </div>
                   )}
                   <span className="text-sm text-slate-600 dark:text-neutral-400 flex items-center gap-1">
                     <Calendar className="w-4 h-4" />
@@ -648,7 +940,6 @@ export default function AnalysisDetailPage() {
                           src={getImageUrl(img)}
                           alt={viewType.toUpperCase()}
                           className="w-full h-full object-contain"
-                          crossOrigin="anonymous"
                           onError={handleImageError}
                           onLoad={(e) => {
                             const imgElement = e.target as HTMLImageElement;
@@ -809,6 +1100,14 @@ export default function AnalysisDetailPage() {
                       onClick={() => setZoom(1)}
                       className="p-2 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
                     >
+                      <RefreshCw className="w-4 h-4" />
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => setIsFullscreenOpen(true)}
+                      className="p-2 rounded-lg bg-indigo-600/10 text-indigo-600 hover:bg-indigo-600/20 dark:bg-indigo-500/20 dark:text-indigo-300 dark:hover:bg-indigo-500/30"
+                    >
                       <Maximize2 className="w-4 h-4" />
                     </motion.button>
                   </div>
@@ -823,11 +1122,10 @@ export default function AnalysisDetailPage() {
                       ref={imageRef}
                       src={getImageUrl(selectedImage)}
                       alt={selectedImage.original_filename}
-                      crossOrigin="anonymous"
                       onError={handleImageError}
                       onLoad={() => {
                         setImageLoaded(true);
-                        drawDetections();
+                        drawDetections(imageRef.current, canvasRef.current);
                       }}
                       className="max-w-full h-auto"
                     />
@@ -862,7 +1160,6 @@ export default function AnalysisDetailPage() {
                           src={getImageUrl(img)}
                           alt={img.original_filename}
                           className="w-full h-full object-cover"
-                          crossOrigin="anonymous"
                           onError={handleImageError}
                         />
                         {img.detections_count > 0 && (
@@ -1005,6 +1302,91 @@ export default function AnalysisDetailPage() {
           </div>
         )}
       </div>
+
+      <AnimatePresence>
+        {isFullscreenOpen && selectedImage && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex flex-col bg-black/85 backdrop-blur-sm"
+          >
+            <div className="flex items-center justify-between px-6 py-4 text-white">
+              <div>
+                <p className="text-lg font-semibold">{selectedImage.original_filename}</p>
+                <p className="text-xs text-white/70">
+                  {selectedImage.detections_count} ta topilma · Koʼrinish: {selectedImage.view_type.toUpperCase()}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setShowDetections(!showDetections)}
+                  className={`px-3 py-2 rounded-lg text-sm font-semibold transition ${
+                    showDetections ? "bg-indigo-500 text-white" : "bg-white/15 text-white"
+                  }`}
+                >
+                  {showDetections ? "Annotatsiya: ON" : "Annotatsiya: OFF"}
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setFullscreenZoom(Math.max(0.5, fullscreenZoom - 0.1))}
+                  className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20"
+                >
+                  <ZoomOut className="w-4 h-4" />
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setFullscreenZoom(Math.min(4, fullscreenZoom + 0.1))}
+                  className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20"
+                >
+                  <ZoomIn className="w-4 h-4" />
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setFullscreenZoom(1)}
+                  className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setIsFullscreenOpen(false)}
+                  className="p-2 rounded-lg bg-white/15 text-white hover:bg-white/25"
+                >
+                  <X className="w-4 h-4" />
+                </motion.button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              <div
+                className="relative inline-block"
+                style={{ transform: `scale(${fullscreenZoom})`, transformOrigin: "top left" }}
+              >
+                <img
+                  ref={fullscreenImageRef}
+                  src={getImageUrl(selectedImage)}
+                  alt={selectedImage.original_filename}
+                  onError={handleImageError}
+                  onLoad={() => {
+                    drawDetections(fullscreenImageRef.current, fullscreenCanvasRef.current);
+                  }}
+                  className="max-w-full h-auto"
+                />
+                <canvas
+                  ref={fullscreenCanvasRef}
+                  className="absolute top-0 left-0 pointer-events-none"
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Delete Confirmation Modal */}
       <AnimatePresence>

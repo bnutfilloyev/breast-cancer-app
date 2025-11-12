@@ -1,0 +1,34 @@
+%% IDEF0 diagram for breast cancer detection platform
+flowchart TB
+    subgraph A0["A0: Breast Cancer Detection Platform"]
+        direction TB
+        A1["A1: Acquire & Validate Imaging Inputs"]
+        A2["A2: Run YOLO11L Inference Pipeline"]
+        A3["A3: Persist Findings & Generate Reports"]
+        A4["A4: Present Insights & System Metrics"]
+        A1 --> A2 --> A3 --> A4
+    end
+
+    %% Inputs
+    Imaging[/Multi-view mammogram images/] -->|"Input"| A1
+    PatientData[/Patient demographics & history/] -->|"Input"| A1
+    PriorAnalyses[/Historical analyses & detections/] -->|"Input"| A3
+
+    %% Controls
+    Guidelines([Clinical protocols & BI-RADS policy]) -.->|"Control"| A2
+    Thresholds([Model thresholds & QA rules]) -.->|"Control"| A2
+    Compliance([Audit & retention policies]) -.->|"Control"| A3
+
+    %% Outputs
+    A3 -->|Output| Reports["Analysis summaries (JSON & PDF)"]
+    A3 -->|Output| Findings["SQLModel analysis tables"]
+    A4 -->|Output| Dashboard["Interactive dashboard and alerts"]
+    A4 -->|Output| Exports["Patient-ready deliverables"]
+
+    %% Mechanisms
+    Backend[[FastAPI backend services]] -->|"Mechanism"| A2
+    Model[[YOLO11L weights & inference service]] -->|"Mechanism"| A2
+    Storage[[File storage & thumbnails]] -->|"Mechanism"| A3
+    Database[(PostgreSQL + SQLModel ORM)] -->|"Mechanism"| A3
+    Frontend[[Next.js clinician UI]] -->|"Mechanism"| A4
+    Monitoring[[Logging & observability stack]] -->|"Mechanism"| A4

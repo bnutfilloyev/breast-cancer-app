@@ -1,0 +1,9 @@
+%% Analysis lifecycle state diagram
+stateDiagram-v2
+    [*] --> Pending: Analysis yaratildi
+    Pending --> Processing: Fayllar yuklandi va model ishga tushdi
+    Processing --> Completed: YOLO inferensiyasi muvaffaqiyatli tugadi
+    Processing --> Failed: Xato yoki validatsiya muammosi
+    Failed --> Processing: Qayta ishga tushirish
+    Completed --> Archived: Hisobot eksport qilindi va nazorat tugadi
+    Archived --> [*]

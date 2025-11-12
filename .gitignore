@@ -1,0 +1,5 @@
+.env
+.DS_Store
+model_final.pth
+uploads/*
+logs/*

@@ -1,0 +1,25 @@
+%% High-level deployment and component topology
+flowchart LR
+    subgraph ClinicianWorkspace["Clinician Environment"]
+        Browser["Secure Browser\nNext.js UI"]
+    end
+
+    subgraph PlatformInfrastructure["Platform Infrastructure"]
+        subgraph Services["Application Services"]
+            APIService["FastAPI Service\n(uvicorn + SQLModel)"]
+            ModelWorker["Inference Worker\nYOLO11L Runtime"]
+        end
+        subgraph DataPlane["Persistent Stores"]
+            Database[("PostgreSQL\npatients / analyses")]
+            ObjectStorage[("Object Storage\nimages + thumbnails")]
+            LogSink[("Observability Stack\nlogs + metrics")]
+        end
+    end
+
+    Browser <--> APIService
+    APIService --> ModelWorker
+    APIService --> Database
+    APIService --> LogSink
+    ModelWorker --> Database
+    ModelWorker --> ObjectStorage
+    ModelWorker --> LogSink

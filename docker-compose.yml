@@ -44,6 +44,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/breast_cancer
       - REDIS_URL=redis://redis:6379/0
+      - MODEL_TYPE=yolo
       - MODEL_DEVICE=cpu
       - MODEL_CONFIDENCE=0.25
       - MODEL_IMGSZ=1280

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlmodel import Session
 from PIL import Image, UnidentifiedImageError
 
@@ -20,6 +21,7 @@ from .file_manager import file_manager
 from .logger import get_logger, setup_logging
 from .middleware import ExceptionHandlerMiddleware, LoggingMiddleware, RequestIDMiddleware
 from .model_service import InferenceService, get_inference_service
+from .torch_model_service import TorchInferenceService, get_torch_inference_service
 from .schemas import InferenceResponse, ViewPrediction
 
 # Setup logging
@@ -52,12 +54,34 @@ app.add_middleware(
 )
 
 
+# Model selection helper
+def get_model_service() -> Union[InferenceService, TorchInferenceService]:
+    """Get the configured model service (YOLO or PyTorch)."""
+    model_type = os.getenv("MODEL_TYPE", "yolo").lower()  # Default to YOLO
+    
+    if model_type == "yolo":
+        logger.info("Using YOLO model service")
+        return get_inference_service()
+    else:
+        logger.info("Using PyTorch model service")
+        return get_torch_inference_service()
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     """Initialize database on startup."""
     logger.info("Starting application...")
     await init_db()
     logger.info("Database initialized")
+    
+    # Load model on startup to catch errors early
+    try:
+        model_service = get_model_service()
+        logger.info(f"Model service initialized: {model_service.model_info.name}")
+        logger.info(f"Classes: {model_service.model_info.classes}")
+    except Exception as e:
+        logger.error(f"Failed to initialize model service: {e}")
+        raise
 
 
 @app.on_event("shutdown")
@@ -169,6 +193,90 @@ def _patient_to_schema(session: Session, patient: models.Patient) -> schemas.Pat
         analyses=[_analysis_to_summary(a) for a in analyses],
     )
 
+def _build_analysis_json(
+    analysis: models.Analysis, images: list[models.AnalysisImage]
+) -> dict:
+    """Serialise analysis and images for export."""
+    summary = _analysis_to_summary(analysis).model_dump()
+    summary.update(
+        {
+            "findings_description": analysis.findings_description,
+            "recommendations": analysis.recommendations,
+            "images": [img.model_dump() for img in images],
+        }
+    )
+    return summary
+
+
+def _create_pdf_report(payload: dict) -> bytes:
+    """Create a very small single-page PDF summarising an analysis."""
+    from textwrap import wrap
+
+    lines = [
+        "Analysis Report",
+        f"Analysis ID: {payload.get('id')}",
+        f"Status: {payload.get('status')}",
+        f"Dominant label: {payload.get('dominant_label', 'N/A')}",
+        f"Total findings: {payload.get('total_findings', 0)}",
+    ]
+    if payload.get("findings_description"):
+        lines.append(f"Findings: {payload['findings_description']}")
+    if payload.get("recommendations"):
+        lines.append(f"Recommendations: {payload['recommendations']}")
+
+    text_commands = [
+        "BT",
+        "/F1 12 Tf",
+        "1 0 0 1 72 740 Tm",
+        "14 TL",
+    ]
+    for raw_line in lines:
+        for part in wrap(str(raw_line), 80):
+            safe = part.replace("(", r"\(").replace(")", r"\)")
+            text_commands.append(f"({safe}) Tj")
+            text_commands.append("T*")
+        text_commands.append("T*")
+    text_commands.append("ET")
+    content = "\n".join(text_commands).encode("utf-8")
+
+    objects: list[bytes] = []
+    offsets: list[int] = []
+
+    def add_object(obj: str) -> None:
+        offsets.append(sum(len(o) for o in objects) + len(b"%PDF-1.4\n"))
+        objects.append((obj + "\n").encode("utf-8"))
+
+    add_object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj")
+    add_object("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj")
+    add_object(
+        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >> endobj"
+    )
+    add_object(
+        f"4 0 obj << /Length {len(content)} >> stream\n"
+        + content.decode("utf-8")
+        + "\nendstream endobj"
+    )
+    add_object("5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj")
+
+    xref_offset = sum(len(o) for o in objects) + len(b"%PDF-1.4\n")
+    xref_lines = ["xref", "0 6", "0000000000 65535 f "]
+    for offset in offsets:
+        xref_lines.append(f"{offset:010d} 00000 n ")
+
+    trailer = "trailer << /Size 6 /Root 1 0 R >>\nstartxref\n{0}\n%%EOF".format(
+        xref_offset
+    )
+
+    pdf = bytearray()
+    pdf.extend(b"%PDF-1.4\n")
+    for obj in objects:
+        pdf.extend(obj)
+    pdf.extend("\n".join(xref_lines).encode("utf-8"))
+    pdf.extend(b"\n")
+    pdf.extend(trailer.encode("utf-8"))
+    return bytes(pdf)
+
 
 # ============ INFERENCE ENDPOINTS ============
 
@@ -178,8 +286,8 @@ async def infer_multi(
     rcc: UploadFile = File(..., description="Right Craniocaudal view image."),
     lmlo: UploadFile = File(..., description="Left Mediolateral Oblique view image."),
     rmlo: UploadFile = File(..., description="Right Mediolateral Oblique view image."),
-    patient_id: Optional[int] = None,
-    service: InferenceService = Depends(get_inference_service),
+    patient_id: Optional[int] = Form(None),
+    service: Union[InferenceService, TorchInferenceService] = Depends(get_model_service),
     session: Session = Depends(get_session),
 ) -> InferenceResponse:
     """
@@ -229,7 +337,7 @@ async def infer_multi(
             try:
                 # Reset file pointer
                 await upload_file.seek(0)
-                
+
                 # Save file
                 file_info = await file_manager.save_upload(
                     upload_file,
@@ -237,16 +345,16 @@ async def infer_multi(
                     analysis_id=analysis.id,
                     view_name=view_name,
                 )
-                
+
                 # Get prediction data
                 prediction = predictions[view_name]
-                
+
                 # Create AnalysisImage
                 crud.create_analysis_image(
                     session,
                     analysis.id,
                     schemas.AnalysisImageCreate(
-                        view_type=models.ImageViewType[view_name.upper()],
+                        view_type=models.ImageViewType(view_name.lower()),
                         file_id=file_info["file_id"],
                         filename=file_info["filename"],
                         original_filename=file_info["original_filename"],
@@ -265,6 +373,11 @@ async def infer_multi(
             except Exception as exc:
                 logger.error(f"Failed to save {view_name} image: {exc}")
                 # Continue with other images
+            finally:
+                try:
+                    await upload_file.close()
+                except Exception:
+                    pass
         
         # 5. Update analysis with results
         total, dominant_label, dominant_category, summary = _summarise_predictions("multi", predictions)
@@ -309,8 +422,8 @@ async def infer_multi(
 @app.post("/infer/single", response_model=InferenceResponse)
 async def infer_single(
     image: UploadFile = File(..., description="Single-view image under review."),
-    patient_id: Optional[int] = None,
-    service: InferenceService = Depends(get_inference_service),
+    patient_id: Optional[int] = Form(None),
+    service: Union[InferenceService, TorchInferenceService] = Depends(get_model_service),
     session: Session = Depends(get_session),
 ) -> InferenceResponse:
     """Run inference on a single suspicious image with file storage."""
@@ -372,7 +485,7 @@ async def infer_single(
             session,
             analysis.id,
             schemas.AnalysisImageCreate(
-                view_type=models.ImageViewType.SINGLE,
+                view_type=models.ImageViewType.SINGLE.value,
                 file_id=file_info["file_id"],
                 filename=file_info["filename"],
                 original_filename=file_info["original_filename"],
@@ -440,8 +553,6 @@ async def _read_image(upload: UploadFile, view: str) -> Image.Image:
         raise HTTPException(
             status_code=400, detail=f"{view} view must be a valid image file."
         ) from exc
-    finally:
-        await upload.close()
 
 
 async def _read_images(uploads: Dict[str, UploadFile]) -> Dict[str, Image.Image]:
@@ -629,7 +740,15 @@ def list_analyses(
     session: Session = Depends(get_session),
 ):
     """List all analyses with pagination and filters."""
-    analyses = crud.list_all_analyses(session, skip=skip, limit=limit, status=status)
+    limit = max(1, limit or 0)
+    skip = max(0, skip or 0)
+    analyses = crud.list_all_analyses(
+        session,
+        skip=skip,
+        limit=limit,
+        status=status,
+        patient_id=patient_id,
+    )
     total = crud.count_analyses(session, status=status, patient_id=patient_id)
     
     return schemas.AnalysisListResponse(
@@ -700,8 +819,49 @@ def delete_analysis(
         raise HTTPException(status_code=500, detail=f"Failed to delete analysis: {str(exc)}")
 
 
+@app.get("/export/analyses/{analysis_id}/json")
+def export_analysis_json(
+    analysis_id: int,
+    session: Session = Depends(get_session),
+):
+    """Return analysis payload in JSON format for archival or integrations."""
+    try:
+        analysis = crud.get_analysis(session, analysis_id)
+        images = crud.list_analysis_images(session, analysis_id)
+    except Exception as exc:
+        logger.error(f"Failed to export analysis {analysis_id}: {exc}")
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    payload = _build_analysis_json(analysis, images)
+    return JSONResponse(payload)
+
+
+@app.get("/export/analyses/{analysis_id}/pdf")
+def export_analysis_pdf(
+    analysis_id: int,
+    session: Session = Depends(get_session),
+):
+    """Generate a lightweight PDF summary for download."""
+    try:
+        analysis = crud.get_analysis(session, analysis_id)
+        images = crud.list_analysis_images(session, analysis_id)
+    except Exception as exc:
+        logger.error(f"Failed to export analysis {analysis_id}: {exc}")
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    payload = _build_analysis_json(analysis, images)
+    pdf_bytes = _create_pdf_report(payload)
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=analysis-{analysis_id}.pdf",
+        },
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
-

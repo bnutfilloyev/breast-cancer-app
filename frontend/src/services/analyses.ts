@@ -48,5 +48,38 @@ export const analysisService = {
     }
     return this.list(params);
   },
-};
 
+  async createMulti(files: {
+    lcc: File;
+    rcc: File;
+    lmlo: File;
+    rmlo: File;
+  }, patientId?: number) {
+    const formData = new FormData();
+    formData.append("lcc", files.lcc);
+    formData.append("rcc", files.rcc);
+    formData.append("lmlo", files.lmlo);
+    formData.append("rmlo", files.rmlo);
+    if (patientId) {
+      formData.append("patient_id", String(patientId));
+    }
+
+    const { data } = await httpClient.post("/infer/multi", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+
+    return data as { analysis_id: number } & Record<string, unknown>;
+  },
+
+  async exportJson(id: number) {
+    const { data } = await httpClient.get(`/export/analyses/${id}/json`);
+    return data as Record<string, unknown>;
+  },
+
+  async exportPdf(id: number) {
+    const response = await httpClient.get(`/export/analyses/${id}/pdf`, {
+      responseType: "blob",
+    });
+    return response.data as Blob;
+  },
+};

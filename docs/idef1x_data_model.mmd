@@ -1,0 +1,68 @@
+%% IDEF1X-style entity relationship overview using Mermaid ER diagram
+erDiagram
+    PATIENT ||--o{ ANALYSIS : "has"
+    ANALYSIS ||--o{ ANALYSIS_IMAGE : "captures"
+    PATIENT ||--o{ AUDIT_LOG : "logs changes for"
+
+    PATIENT {
+        int id PK "Identity"
+        string full_name
+        string medical_record_number "Unique, nullable"
+        datetime date_of_birth
+        enum gender "male|female|other"
+        string phone
+        string email
+        text address
+        text notes
+        boolean is_active
+        datetime created_at
+        datetime updated_at
+    }
+
+    ANALYSIS {
+        int id PK
+        int patient_id FK
+        enum mode "single|multi"
+        enum status "pending|processing|completed|failed"
+        int total_findings
+        string dominant_label
+        string dominant_category "normal|benign|malignant"
+        json summary "Serialized detections"
+        text findings_description
+        text recommendations
+        datetime created_at
+        datetime updated_at
+        datetime completed_at
+    }
+
+    ANALYSIS_IMAGE {
+        int id PK
+        int analysis_id FK
+        enum view_type "lcc|rcc|lmlo|rmlo|single|other"
+        string file_id "UUID"
+        string filename
+        string original_filename
+        string file_path
+        string relative_path
+        string thumbnail_path
+        int file_size
+        string file_hash "SHA-256"
+        string content_type
+        int width
+        int height
+        int detections_count
+        json detections_data
+        datetime created_at
+    }
+
+    AUDIT_LOG {
+        int id PK
+        string entity_type "patient|analysis|image"
+        int entity_id
+        string action "create|update|delete"
+        int user_id "Reserved for future auth"
+        json changes
+        string ip_address
+        string user_agent
+        datetime created_at
+    }

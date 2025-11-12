@@ -1,17 +1,49 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 
 import { analysisService } from "@/services/analyses";
-import type { AnalysisListParams, AnalysisListResponse } from "@/types/analysis";
+import type {
+  AnalysisDetail,
+  AnalysisListParams,
+  AnalysisListResponse,
+  AnalysisUpdateInput,
+} from "@/types/analysis";
 
 export const ANALYSES_QUERY_KEY = "analyses";
 
-export function useAnalysesList(params: AnalysisListParams) {
-  return useQuery({
-    queryKey: [ANALYSES_QUERY_KEY, params],
+type UseAnalysesOptions = {
+  enabled?: boolean;
+};
+
+export function useAnalysesList(
+  params?: AnalysisListParams,
+  options?: UseAnalysesOptions,
+) {
+  return useQuery<AnalysisListResponse>({
+    queryKey: [ANALYSES_QUERY_KEY, params ?? {}],
     queryFn: () => analysisService.list(params),
-    keepPreviousData: true,
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useAnalysisDetail(id?: number) {
+  return useQuery<AnalysisDetail>({
+    queryKey: [ANALYSES_QUERY_KEY, "detail", id],
+    queryFn: () => analysisService.get(id as number),
+    enabled: typeof id === "number" && id > 0,
+  });
+}
+
+export function useUpdateAnalysis(id: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: AnalysisUpdateInput) => analysisService.update(id, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [ANALYSES_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [ANALYSES_QUERY_KEY, "detail", id] });
+    },
   });
 }
 
@@ -48,4 +80,3 @@ export function useDeleteAnalysis() {
     },
   });
 }
-

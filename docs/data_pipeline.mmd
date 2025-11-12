@@ -1,0 +1,11 @@
+%% Data lifecycle for mammography AI system
+flowchart LR
+    A["Data Sources\n(PACS, DICOM exports, research datasets)"] --> B["Ingestion & De-identification\n(DICOM parsing, PHI removal)"]
+    B --> C["Annotation & QA\n(Radiologist labels, BI-RADS audit)"]
+    C --> D["Dataset Curation\n(Split strategy, stratified sampling, augment policy)"]
+    D --> E["Training Pipeline\n(YOLO11L, hyperparameter search, mixed precision)"]
+    E --> F["Evaluation & Benchmarking\n(Validation set, confusion matrix, ROC curves)"]
+    F --> G["Model Registry\n(versioning, weight promotion)"]
+    G --> H["Deployment\n(Serving weights, FastAPI reload)"]
+    H --> I["Monitoring & Feedback\n(Drift detection, clinician review loop)"]
+    I --> C

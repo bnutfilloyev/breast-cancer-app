@@ -1,0 +1,20 @@
+%% Monitoring and quality assurance architecture
+gantt
+    dateFormat  HH:mm
+    axisFormat  %Hh
+    title Monitoring & QA Cadence (rolling 24h)
+
+    section Inference Telemetry
+    Real-time logging ingestion        :done,    log1, 00:00, 06:00
+    Metric aggregation windows         :active,  log2, 06:00, 12:00
+    Drift & anomaly detection          :         log3, 12:00, 18:00
+
+    section Clinical QA
+    Radiologist spot-check batch       :         qa1, 03:00, 09:00
+    Feedback triage & ticketing        :         qa2, 09:00, 15:00
+    Threshold recalibration review     :         qa3, 15:00, 21:00
+
+    section Maintenance
+    Backup & archive rotation          :         ops1, 02:00, 04:00
+    Security & compliance audit        :         ops2, 10:00, 12:00
+    Model retrain trigger evaluation   :         ops3, 18:00, 24:00

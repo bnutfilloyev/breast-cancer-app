@@ -7,21 +7,26 @@ WORKDIR /app
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        build-essential \
-        libgl1 \
-        libglib2.0-0 && \
+    build-essential \
+    git \
+    libgl1 \
+    libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./requirements.txt
 
+# Install requirements
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 COPY backend ./backend
 COPY breast_cancer_detection_yolo11l_1280 ./breast_cancer_detection_yolo11l_1280
+COPY model_final.pth ./model_final.pth
 
 WORKDIR /app/backend
 
+ENV MODEL_TYPE=yolo
+ENV TORCH_MODEL_WEIGHTS_PATH=/app/model_final.pth
 ENV MODEL_WEIGHTS_PATH=/app/breast_cancer_detection_yolo11l_1280/weights/best.pt
 
 EXPOSE 8000

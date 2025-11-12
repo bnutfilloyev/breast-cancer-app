@@ -181,6 +181,7 @@ def list_all_analyses(
     skip: int = 0,
     limit: int = 100,
     status: Optional[models.AnalysisStatus] = None,
+    patient_id: Optional[int] = None,
 ) -> list[models.Analysis]:
     """List all analyses with optional filtering."""
     try:
@@ -188,6 +189,8 @@ def list_all_analyses(
         
         if status:
             statement = statement.where(models.Analysis.status == status)
+        if patient_id:
+            statement = statement.where(models.Analysis.patient_id == patient_id)
         
         statement = statement.order_by(models.Analysis.created_at.desc())
         statement = statement.offset(skip).limit(limit)
@@ -518,4 +521,3 @@ def get_findings_breakdown(session: Session) -> dict:
     except Exception as exc:
         logger.error(f"Failed to get findings breakdown: {exc}")
         raise DatabaseError(f"Failed to get findings breakdown: {str(exc)}")
-

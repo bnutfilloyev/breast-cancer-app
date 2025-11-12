@@ -1,9 +1,14 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 
 import { patientService } from "@/services/patients";
-import type { PatientListParams, PatientListResponse } from "@/types/patient";
+import type {
+  PatientCreateInput,
+  PatientListParams,
+  PatientListResponse,
+  PatientUpdateInput,
+} from "@/types/patient";
 
 export const PATIENTS_QUERY_KEY = "patients";
 
@@ -11,7 +16,36 @@ export function usePatientsList(params: PatientListParams) {
   return useQuery({
     queryKey: [PATIENTS_QUERY_KEY, params],
     queryFn: () => patientService.list(params),
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function usePatientDetail(id?: number) {
+  return useQuery({
+    queryKey: [PATIENTS_QUERY_KEY, "detail", id],
+    queryFn: () => patientService.get(id as number),
+    enabled: typeof id === "number" && id > 0,
+  });
+}
+
+export function useCreatePatient() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: PatientCreateInput) => patientService.create(payload),
+    onSuccess: (_data) => {
+      queryClient.invalidateQueries({ queryKey: [PATIENTS_QUERY_KEY] });
+    },
+  });
+}
+
+export function useUpdatePatient(id: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: PatientUpdateInput) => patientService.update(id, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [PATIENTS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [PATIENTS_QUERY_KEY, "detail", id] });
+    },
   });
 }
 
@@ -48,4 +82,3 @@ export function useDeletePatient() {
     },
   });
 }
-
